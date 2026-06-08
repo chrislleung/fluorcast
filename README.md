@@ -186,7 +186,7 @@ If `solvent_descriptors.csv` is missing, the training pipeline can create a blan
 
 ## Solvent Descriptors
 
-This repository may include `solvent_descriptors.csv`, an auxiliary solvent-property table used for feature generation.
+This repository includes `solvent_descriptors.csv`, an auxiliary table of solvent properties used for feature generation.
 
 The table includes descriptors such as:
 
