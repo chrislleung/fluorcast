@@ -83,6 +83,16 @@ To run this project, download the dataset from Figshare and place the processed 
 chemfluor_data.csv
 ```
 
+---
+
+## Solvent Descriptors
+
+This repository includes `solvent_descriptors.csv`, an auxiliary solvent-property table used by the model. It contains descriptors such as dielectric constant, refractive index, dipole moment, hydrogen-bond donor/acceptor parameters, and ET(30) polarity.
+
+These descriptors are included to make the feature generation process reproducible. Values should be checked against primary or reference sources before publication-quality use, since solvent properties can depend on temperature, source, and definition.
+
+---
+
 ## Required Dataset Columns
 
 The training dataset should be named:
