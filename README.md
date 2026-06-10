@@ -54,12 +54,6 @@ The ChemFluor dataset is publicly available on Figshare:
 * License: **CC BY 4.0**
 * Authors listed on Figshare: Cheng-Wei Ju, Rizhang Liu, Bo Li, Hanzhi Bai
 
-To run this project, download the dataset from Figshare and place the processed CSV file in the project root as:
-
-```text
-chemfluor_data.csv
-```
-
 The pipeline expects at least these columns:
 
 ```text
