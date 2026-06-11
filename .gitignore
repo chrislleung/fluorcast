@@ -100,3 +100,5 @@ data/raw/
 !data/processed/
 !data/processed/*.csv
 !data/README.md
+# Local development notes
+development md/
