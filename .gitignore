@@ -76,14 +76,14 @@ models/
 
 # Candidate-screening outputs are generated and reproducible.
 data/generated_candidates/
-data/processed/fluodb_lite/
+#data/processed/fluodb_lite/
 outputs/candidate_screening/
 
 # =========================
 # Raw/private data
 # =========================
 # Keep private/raw local data out of GitHub unless intentionally sanitized.
-data/raw/
+#data/raw/
 #chemfluor_data.csv
 
 # =========================

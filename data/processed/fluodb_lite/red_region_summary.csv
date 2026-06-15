@@ -1,0 +1,9 @@
+stage,source_dataset,rows,emission_ge_550,emission_ge_580,emission_ge_600,emission_ge_650,emission_ge_700,emission_ge_750
+before_dedup,FluoDB-Lite,49602,9259,6257,4852,2303,1051,347
+before_dedup,chemfluor,4386,2015,1197,882,450,219,68
+before_dedup,deep4chem,20833,5273,3826,2986,1433,676,215
+before_dedup,ALL,74821,16547,11280,8720,4186,1946,630
+after_dedup,FluoDB-Lite,41748,7615,5097,3939,1846,846,281
+after_dedup,chemfluor,4368,2007,1197,882,450,219,68
+after_dedup,deep4chem,20704,5228,3791,2959,1410,655,207
+after_dedup,ALL,66820,14850,10085,7780,3706,1720,556

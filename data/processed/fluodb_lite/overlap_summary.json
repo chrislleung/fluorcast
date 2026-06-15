@@ -1,0 +1,56 @@
+{
+  "after_deduplication": {
+    "duplicate_counts_by_source_combination": {},
+    "exact_duplicate_rows_removed": 0,
+    "fluodb_exact_overlaps_with_chemfluor": 0,
+    "fluodb_exact_overlaps_with_deep4chem": 0,
+    "molecule_solvent_pairs_with_multiple_measurements": 3605,
+    "red_region_counts": {
+      "emission_ge_550": 14850,
+      "emission_ge_580": 10085,
+      "emission_ge_600": 7780,
+      "emission_ge_650": 3706,
+      "emission_ge_700": 1720,
+      "emission_ge_750": 556
+    },
+    "rows_by_source": {
+      "FluoDB-Lite": 41748,
+      "chemfluor": 4368,
+      "deep4chem": 20704
+    },
+    "total_rows": 66820,
+    "unique_exact_measurements": 66820
+  },
+  "before_deduplication": {
+    "duplicate_counts_by_source_combination": {
+      "FluoDB-Lite,deep4chem": 7854,
+      "chemfluor": 14,
+      "deep4chem": 90
+    },
+    "exact_duplicate_rows_removed": 8001,
+    "fluodb_exact_overlaps_with_chemfluor": 0,
+    "fluodb_exact_overlaps_with_deep4chem": 7854,
+    "molecule_solvent_pairs_with_multiple_measurements": 3605,
+    "red_region_counts": {
+      "emission_ge_550": 16547,
+      "emission_ge_580": 11280,
+      "emission_ge_600": 8720,
+      "emission_ge_650": 4186,
+      "emission_ge_700": 1946,
+      "emission_ge_750": 630
+    },
+    "rows_by_source": {
+      "FluoDB-Lite": 49602,
+      "chemfluor": 4386,
+      "deep4chem": 20833
+    },
+    "total_rows": 74821,
+    "unique_exact_measurements": 66820
+  },
+  "exact_duplicate_rows_removed": 8001,
+  "source_preference": [
+    "chemfluor",
+    "deep4chem",
+    "FluoDB-Lite"
+  ]
+}
