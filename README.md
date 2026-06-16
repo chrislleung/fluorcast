@@ -1546,6 +1546,47 @@ outputs/model_experiments_fluodb/error_by_region_comparison.csv
 outputs/model_experiments_fluodb/benchmark_prediction_comparison.csv
 ```
 
+## Neural Model Experiments
+
+Use `scripts/run_neural_model_experiments.py` to test stronger neural baselines against the existing RF, ExtraTrees, HistGB, and GBDT comparison outputs. The script trains separate models for each requested target, saves every sklearn alpha variant, skips PyTorch gracefully when `torch` is unavailable, and writes neural-only plus all-model comparison tables.
+
+Example full run:
+
+```bash
+python scripts/run_neural_model_experiments.py \
+  --standardized-combined data/processed/fluodb_lite/combined_deduplicated.csv \
+  --solvent-descriptors data/solvent_descriptors_expanded_deep4chem.csv \
+  --tree-compare-dir outputs/model_experiments_fluodb \
+  --out-root models/neural_experiments_fluodb \
+  --compare-out outputs/neural_model_experiments_fluodb \
+  --models mlp_small,mlp_medium,mlp_large,pytorch_mlp \
+  --targets emission_nm,quantum_yield \
+  --benchmark-smiles "O=C(S/C(SC)=C(SC)/SC)C1=CC2=C(C=C1)NC3=CC=CC=C3S2" \
+  --benchmark-solvent-smiles "CS(=O)C" \
+  --known-emission-nm 539 \
+  --known-quantum-yield 0.196
+```
+
+Neural model outputs are written to:
+
+```text
+outputs/neural_model_experiments_fluodb/neural_model_comparison.csv
+outputs/neural_model_experiments_fluodb/neural_model_comparison.md
+outputs/neural_model_experiments_fluodb/neural_error_by_region_comparison.csv
+outputs/neural_model_experiments_fluodb/neural_benchmark_prediction_comparison.csv
+```
+
+Combined tree-plus-neural outputs are written to:
+
+```text
+outputs/neural_model_experiments_fluodb/all_model_comparison.csv
+outputs/neural_model_experiments_fluodb/all_model_comparison.md
+outputs/neural_model_experiments_fluodb/all_error_by_region_comparison.csv
+outputs/neural_model_experiments_fluodb/all_benchmark_prediction_comparison.csv
+```
+
+Interpret the neural results by region and use case, not only by global MAE. If RF remains best overall, it should stay the default production model. A neural model is still scientifically useful if it improves low-similarity benchmark molecules, red/NIR emission errors, quantum-yield MAE, or provides a useful model-family disagreement signal for extrapolative molecules.
+
 For Nibi, create a Slurm script such as `run_model_experiments.sh`:
 
 ```bash
