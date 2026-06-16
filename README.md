@@ -1623,6 +1623,63 @@ outputs/neural_model_experiments_fluodb/all_benchmark_prediction_comparison.csv
 
 Interpret the neural results by region and use case, not only by global MAE. If RF remains best overall, it should stay the default production model. A neural model is still scientifically useful if it improves low-similarity benchmark molecules, red/NIR emission errors, quantum-yield MAE, or provides a useful model-family disagreement signal for extrapolative molecules.
 
+## Graph Neural Network Experiments
+
+Use `scripts/run_graph_model_experiments.py` to test whether molecular graphs improve the cases where fingerprint/tree models are weakest: unfamiliar molecules, red/NIR emitters, difficult benchmarks, and model-family disagreement. The first implementation is pure PyTorch and does not require PyTorch Geometric, DGL, Chemprop, or CUDA.
+
+Example full run:
+
+```bash
+python scripts/run_graph_model_experiments.py \
+  --standardized-combined data/processed/fluodb_lite/combined_deduplicated.csv \
+  --solvent-descriptors data/solvent_descriptors_expanded_deep4chem.csv \
+  --tree-compare-dir outputs/model_experiments_fluodb \
+  --neural-compare-dir outputs/neural_model_experiments_fluodb \
+  --out-root models/graph_experiments_fluodb \
+  --compare-out outputs/graph_model_experiments_fluodb \
+  --models graph_gcn,graph_mpnn,graph_gin \
+  --targets emission_nm,quantum_yield \
+  --benchmark-smiles "O=C(S/C(SC)=C(SC)/SC)C1=CC2=C(C=C1)NC3=CC=CC=C3S2" \
+  --benchmark-solvent-smiles "CS(=O)C" \
+  --known-emission-nm 539 \
+  --known-quantum-yield 0.196
+```
+
+Graph-only outputs:
+
+```text
+outputs/graph_model_experiments_fluodb/graph_model_comparison.csv
+outputs/graph_model_experiments_fluodb/graph_model_comparison.md
+outputs/graph_model_experiments_fluodb/graph_error_by_region_comparison.csv
+outputs/graph_model_experiments_fluodb/graph_benchmark_prediction_comparison.csv
+outputs/graph_model_experiments_fluodb/performance_by_similarity_bin.csv
+outputs/graph_model_experiments_fluodb/performance_by_similarity_bin.md
+```
+
+Merged tree, MLP, and graph outputs:
+
+```text
+outputs/graph_model_experiments_fluodb/all_model_comparison.csv
+outputs/graph_model_experiments_fluodb/all_model_comparison.md
+outputs/graph_model_experiments_fluodb/all_error_by_region_comparison.csv
+outputs/graph_model_experiments_fluodb/all_benchmark_prediction_comparison.csv
+outputs/graph_model_experiments_fluodb/model_disagreement_summary.csv
+```
+
+Interpret graph results cautiously. A graph neural network may not beat RF globally, especially on modest tabular chemistry datasets. The key test is whether it improves low-similarity bins, red/NIR error, benchmark molecules, QY behavior, or disagreement-based uncertainty detection. If improvement appears only in high-similarity bins, it is mostly interpolation; improvement in the `0.00-0.30` or `0.30-0.50` similarity bins is stronger evidence for extrapolative value.
+
+Submit the full graph workflow on Nibi:
+
+```bash
+sbatch run_graph_experiments.sh
+```
+
+Submit the short debug run:
+
+```bash
+sbatch run_graph_experiments_debug.sh
+```
+
 For Nibi, create a Slurm script such as `run_neural_experiments.sh`:
 
 ```bash
