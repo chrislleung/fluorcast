@@ -104,4 +104,4 @@ outputs/candidate_screening/
 !data/processed/*.csv
 !data/README.md
 # Local development notes
-development md/
+#development md/
