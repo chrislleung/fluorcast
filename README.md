@@ -6,7 +6,7 @@ FluorCast is a solvent-aware machine learning workflow for predicting fluorescen
 chromophore SMILES + solvent SMILES/name → emission wavelength + quantum yield
 ```
 
-This README covers the current combined workflow only:
+This README covers the current combined workflow with datasets:
 
 ```text
 ChemFluor + Deep4Chem + FluoDB-Lite
@@ -153,69 +153,22 @@ git pull origin main
 
 Training should be run with Slurm, not directly on the login node.
 
+The Slurm scripts are already included in the GitHub repository, so you do not need to create or paste them manually.
+
 ### 1. Tree Model Experiments
 
 This trains RF, ExtraTrees, HistGB, and GBDT on emission and quantum yield.
 
-Create:
-
 ```bash
-nano run_model_experiments.sh
-```
-
-Paste:
-
-```bash
-#!/bin/bash
-#SBATCH --job-name=chemfluor_models
-#SBATCH --account=def-yzhao
-#SBATCH --time=12:00:00
-#SBATCH --cpus-per-task=16
-#SBATCH --mem=64G
-#SBATCH --output=outputs/slurm/model_experiments_%j.out
-#SBATCH --error=outputs/slurm/model_experiments_%j.err
-
-set -euo pipefail
-
 cd ~/scratch/ChemFluor_Project
-
-mkdir -p outputs/slurm
-mkdir -p models/experiments_fluodb
-mkdir -p outputs/model_experiments_fluodb
-
-module purge
-module load python/3.11
-module load gcc
-module load rdkit
-
-source ~/scratch/chemfluor_env/bin/activate
-
-python scripts/run_combined_model_experiments.py \
-  --standardized-combined data/processed/fluodb_lite/combined_deduplicated.csv \
-  --solvent-descriptors data/solvent_descriptors_expanded_deep4chem.csv \
-  --out-root models/experiments_fluodb \
-  --models rf,extratrees,histgb,gbdt \
-  --targets emission_nm,quantum_yield \
-  --compare-out outputs/model_experiments_fluodb \
-  --benchmark-smiles "O=C(S/C(SC)=C(SC)/SC)C1=CC2=C(C=C1)NC3=CC=CC=C3S2" \
-  --benchmark-solvent-smiles "CS(=O)C" \
-  --known-emission-nm 539 \
-  --known-quantum-yield 0.196 \
-  --n-jobs 16
-```
-
-Submit:
-
-```bash
-chmod +x run_model_experiments.sh
-sbatch run_model_experiments.sh
+sbatch run_model_experiments_fluodb.sh
 ```
 
 Monitor:
 
 ```bash
 squeue -u $USER
-tail -f outputs/slurm/model_experiments_<JOBID>.out
+ls -lh outputs/slurm | tail -20
 ```
 
 Outputs:
@@ -229,58 +182,18 @@ outputs/model_experiments_fluodb/
 
 ### 2. Neural MLP Experiments
 
-Create:
+This trains MLP baselines and compares them with the tree-model results.
 
 ```bash
-nano run_neural_experiments.sh
-```
-
-Paste:
-
-```bash
-#!/bin/bash
-#SBATCH --job-name=chemfluor_neural
-#SBATCH --account=def-yzhao
-#SBATCH --time=12:00:00
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
-#SBATCH --output=outputs/slurm/neural_experiments_%j.out
-#SBATCH --error=outputs/slurm/neural_experiments_%j.err
-
-set -euo pipefail
-
 cd ~/scratch/ChemFluor_Project
-
-mkdir -p outputs/slurm
-mkdir -p models/neural_experiments_fluodb
-mkdir -p outputs/neural_model_experiments_fluodb
-
-module purge
-module load python/3.11
-module load gcc
-module load rdkit
-
-source ~/scratch/chemfluor_env/bin/activate
-
-python scripts/run_neural_model_experiments.py \
-  --standardized-combined data/processed/fluodb_lite/combined_deduplicated.csv \
-  --solvent-descriptors data/solvent_descriptors_expanded_deep4chem.csv \
-  --tree-compare-dir outputs/model_experiments_fluodb \
-  --out-root models/neural_experiments_fluodb \
-  --compare-out outputs/neural_model_experiments_fluodb \
-  --models mlp_small,mlp_medium,mlp_large \
-  --targets emission_nm,quantum_yield \
-  --benchmark-smiles "O=C(S/C(SC)=C(SC)/SC)C1=CC2=C(C=C1)NC3=CC=CC=C3S2" \
-  --benchmark-solvent-smiles "CS(=O)C" \
-  --known-emission-nm 539 \
-  --known-quantum-yield 0.196
+sbatch run_neural_experiments.sh
 ```
 
-Submit:
+Monitor:
 
 ```bash
-chmod +x run_neural_experiments.sh
-sbatch run_neural_experiments.sh
+squeue -u $USER
+ls -lh outputs/slurm | tail -20
 ```
 
 Outputs:
@@ -294,88 +207,38 @@ outputs/neural_model_experiments_fluodb/
 
 ### 3. GPU Graph Neural Network Experiments
 
-Use GPU for graph models.
+Graph models should be run on GPU.
 
-Create:
+Main graph experiment scripts already included in the repo:
 
-```bash
-nano run_graph_experiments.sh
+```text
+run_graph_gin_emission_3seeds_gpu.sh
+run_graph_gcn_emission_3seeds_gpu.sh
+run_graph_gin_qy_gpu.sh
+run_graph_gcn_qy_gpu.sh
+run_graph_gin_mpnn_emission_gpu.sh
 ```
 
-Paste:
+Recommended emission stability runs:
 
 ```bash
-#!/bin/bash
-#SBATCH --job-name=chemfluor_graph
-#SBATCH --account=def-yzhao
-#SBATCH --partition=gpubase_bygpu_b2
-#SBATCH --gpus-per-node=h100:1
-#SBATCH --time=04:00:00
-#SBATCH --cpus-per-task=8
-#SBATCH --mem=64G
-#SBATCH --output=outputs/slurm/graph_experiments_%j.out
-#SBATCH --error=outputs/slurm/graph_experiments_%j.err
-
-set -euo pipefail
-
 cd ~/scratch/ChemFluor_Project
-
-mkdir -p outputs/slurm
-
-module purge
-module load python/3.11
-module load gcc
-module load rdkit
-
-source ~/scratch/chemfluor_env/bin/activate
-
-python - <<'PY'
-import torch
-print("CUDA available:", torch.cuda.is_available())
-if torch.cuda.is_available():
-    print("CUDA device:", torch.cuda.get_device_name(0))
-PY
-
-for SEED in 0 1 2; do
-  python scripts/run_graph_model_experiments.py \
-    --standardized-combined data/processed/fluodb_lite/combined_deduplicated.csv \
-    --solvent-descriptors data/solvent_descriptors_expanded_deep4chem.csv \
-    --tree-compare-dir outputs/model_experiments_fluodb \
-    --neural-compare-dir outputs/neural_model_experiments_fluodb \
-    --out-root models/graph_gin_emission_3seeds_gpu/seed_${SEED} \
-    --compare-out outputs/graph_gin_emission_3seeds_gpu/seed_${SEED} \
-    --models graph_gin \
-    --targets emission_nm \
-    --seed ${SEED} \
-    --benchmark-smiles "O=C(S/C(SC)=C(SC)/SC)C1=CC2=C(C=C1)NC3=CC=CC=C3S2" \
-    --benchmark-solvent-smiles "CS(=O)C" \
-    --known-emission-nm 539 \
-    --known-quantum-yield 0.196
-done
-
-for SEED in 0 1 2; do
-  python scripts/run_graph_model_experiments.py \
-    --standardized-combined data/processed/fluodb_lite/combined_deduplicated.csv \
-    --solvent-descriptors data/solvent_descriptors_expanded_deep4chem.csv \
-    --tree-compare-dir outputs/model_experiments_fluodb \
-    --neural-compare-dir outputs/neural_model_experiments_fluodb \
-    --out-root models/graph_gcn_emission_3seeds_gpu/seed_${SEED} \
-    --compare-out outputs/graph_gcn_emission_3seeds_gpu/seed_${SEED} \
-    --models graph_gcn \
-    --targets emission_nm \
-    --seed ${SEED} \
-    --benchmark-smiles "O=C(S/C(SC)=C(SC)/SC)C1=CC2=C(C=C1)NC3=CC=CC=C3S2" \
-    --benchmark-solvent-smiles "CS(=O)C" \
-    --known-emission-nm 539 \
-    --known-quantum-yield 0.196
-done
+sbatch run_graph_gin_emission_3seeds_gpu.sh
+sbatch run_graph_gcn_emission_3seeds_gpu.sh
 ```
 
-Submit:
+Optional graph QY runs:
 
 ```bash
-chmod +x run_graph_experiments.sh
-sbatch run_graph_experiments.sh
+sbatch run_graph_gin_qy_gpu.sh
+sbatch run_graph_gcn_qy_gpu.sh
+```
+
+Monitor:
+
+```bash
+squeue -u $USER
+ls -lh outputs/slurm | tail -20
 ```
 
 Outputs:
@@ -383,41 +246,44 @@ Outputs:
 ```text
 models/graph_gin_emission_3seeds_gpu/
 models/graph_gcn_emission_3seeds_gpu/
+models/graph_gin_qy_gpu/
+models/graph_gcn_qy_gpu/
 outputs/graph_gin_emission_3seeds_gpu/
 outputs/graph_gcn_emission_3seeds_gpu/
+outputs/graph_gin_qy_gpu/
+outputs/graph_gcn_qy_gpu/
 ```
 
 ---
+
+### 4. All-Model Prediction Job
+
+The prediction Slurm script is also included.
+
+```bash
+cd ~/scratch/ChemFluor_Project
+sbatch run_predict_all_models.sh
+```
+
+Outputs:
+
+```text
+outputs/predictions/
+outputs/slurm/
+```
 
 ## Run All-Model Prediction
 
 Use `scripts/predict_all_models.py` after trained model artifacts exist.
 
-```bash
-mkdir -p outputs/predictions
-```
-
-Benchmark example:
+For the prepared benchmark/presentation prediction, use the included Slurm script:
 
 ```bash
-python scripts/predict_all_models.py \
-  --smiles "O=C(S/C(SC)=C(SC)/SC)C1=CC2=C(C=C1)NC3=CC=CC=C3S2" \
-  --solvent-smiles "CS(=O)C" \
-  --known-emission-nm 539 \
-  --known-quantum-yield 0.196 \
-  --graph-model-dirs \
-    models/graph_gin_emission_3seeds_gpu/seed_0/graph_gin \
-    models/graph_gin_emission_3seeds_gpu/seed_1/graph_gin \
-    models/graph_gin_emission_3seeds_gpu/seed_2/graph_gin \
-    models/graph_gcn_emission_3seeds_gpu/seed_0/graph_gcn \
-    models/graph_gcn_emission_3seeds_gpu/seed_1/graph_gcn \
-    models/graph_gcn_emission_3seeds_gpu/seed_2/graph_gcn \
-    models/graph_gin_qy_gpu/graph_gin \
-    models/graph_gcn_qy_gpu/graph_gcn \
-  --out outputs/predictions/difficult_benchmark_all_models_with_graphs_and_qy.csv
+cd ~/scratch/ChemFluor_Project
+sbatch run_predict_all_models.sh
 ```
 
-For a new molecule:
+For a custom molecule, run:
 
 ```bash
 python scripts/predict_all_models.py \
@@ -448,8 +314,6 @@ nearest_training_smiles
 confidence_label
 outside_applicability_domain
 ```
-
----
 
 ## Check Results
 
@@ -573,6 +437,6 @@ Safe commit command:
 
 ```bash
 git add scripts src tests README.md requirements.txt .gitignore
-git commit -m "Update README for combined ChemFluor workflow"
+git commit -m "Update README for FluorCast workflow"
 git push origin main
 ```
