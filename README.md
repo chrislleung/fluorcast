@@ -450,3 +450,20 @@ git add scripts src tests README.md requirements.txt .gitignore
 git commit -m "Update README for FluorCast workflow"
 git push origin main
 ```
+
+## Check for an existing molecule-solvent pair
+
+Canonicalize a proposed molecule with RDKit and check it against one or more CSV
+datasets. Solvent names are compared case-insensitively with normalized whitespace.
+
+```bash
+python scripts/check_molecule_in_dataset.py \
+  --smiles "CC1=CC=C(C=C1)N" \
+  --solvent "ethanol" \
+  --dataset data/chemfluor_data.csv \
+  --dataset "data/raw/deep4chem/DB for chromophore_Sci_Data_rev03.csv" \
+  --out outputs/molecule_matches.csv
+```
+
+Use `--smiles-column` and `--solvent-column` for datasets with nonstandard column
+names. Invalid dataset SMILES are skipped and counted in the terminal summary.
