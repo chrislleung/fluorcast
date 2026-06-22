@@ -1,8 +1,0 @@
-{
-  "job_id": "test_job_001",
-  "user_id": "test_user",
-  "molecule_smiles": "CCO",
-  "solvent_smiles": "O",
-  "model_choice": "all",
-  "requested_at": "2026-06-22T12:00:00Z"
-}
