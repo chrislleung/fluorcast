@@ -18,7 +18,8 @@ if [[ ! -d "$FLUORCAST_REPO" ]]; then
 fi
 
 cd "$FLUORCAST_REPO"
-
+module load gcc
+module load rdkit
 if [[ -n "${FLUORCAST_ACTIVATE:-}" ]]; then
     if [[ ! -f "$FLUORCAST_ACTIVATE" ]]; then
         echo "Environment activation script does not exist: $FLUORCAST_ACTIVATE" >&2
