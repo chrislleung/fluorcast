@@ -138,6 +138,34 @@ def test_duplicate_checker_finds_canonical_exact_pair(tmp_path: Path) -> None:
     assert "lifetime_ns" not in result["nearest_matches"][0]
 
 
+def test_duplicate_nearest_match_missing_nullable_fields_are_null(
+    tmp_path: Path,
+) -> None:
+    dataset = tmp_path / "dataset.csv"
+    pd.DataFrame(
+        {
+            "record_id": ["record-missing"],
+            "molecule_smiles": ["CCO"],
+            "solvent_smiles": [None],
+            "emission_nm": [None],
+            "quantum_yield": [None],
+            "source_doi": [None],
+        }
+    ).to_csv(dataset, index=False)
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    write_json(input_path, duplicate_input())
+
+    assert duplicate_runner.run_job(input_path, output_path, dataset, 1) == 0
+    result = json.loads(output_path.read_text(encoding="utf-8"))
+    nearest = result["nearest_matches"][0]
+    assert nearest["record_id"] == "record-missing"
+    assert nearest["solvent_smiles"] is None
+    assert nearest["emission_nm"] is None
+    assert nearest["quantum_yield"] is None
+    assert nearest["source_doi"] is None
+
+
 def test_prediction_success_contract_with_injected_backend(tmp_path: Path) -> None:
     input_path = tmp_path / "input.json"
     output_path = tmp_path / "output.json"

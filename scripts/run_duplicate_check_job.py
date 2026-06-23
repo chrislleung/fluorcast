@@ -63,19 +63,21 @@ def _number(value: Any) -> float | None:
     return None if math.isnan(number) else number
 
 
+def _nullable_string(value: Any) -> str | None:
+    return None if value is None else str(value)
+
+
 def _record(row: pd.Series, similarity: float) -> dict[str, Any]:
     record_id = _value(row, ("record_id", "id", "dataset_row_index"))
     return {
         "record_id": str(record_id),
         "molecule_smiles": str(_value(row, dataset_checker.SMILES_CANDIDATES)),
-        "solvent_smiles": str(_value(row, SOLVENT_SMILES_CANDIDATES)),
+        "solvent_smiles": _nullable_string(_value(row, SOLVENT_SMILES_CANDIDATES)),
         "similarity": float(similarity),
         "emission_nm": _number(_value(row, ("emission_nm", "emission"))),
         "quantum_yield": _number(_value(row, ("quantum_yield", "plqy"))),
-        "source_doi": (
-            None
-            if (doi := _value(row, ("source_doi", "reference_doi", "doi"))) is None
-            else str(doi)
+        "source_doi": _nullable_string(
+            _value(row, ("source_doi", "reference_doi", "doi"))
         ),
     }
 
