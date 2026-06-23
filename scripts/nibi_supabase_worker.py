@@ -163,7 +163,7 @@ def prediction_results_rows(output: dict[str, Any]) -> list[dict[str, Any]]:
     for prediction in output.get("predictions", []):
         rows.append(
             {
-                "prediction_job_id": job_id,
+                "job_id": job_id,
                 "model_name": prediction.get("model_name"),
                 "predicted_emission_nm": prediction.get("predicted_emission_nm"),
                 "predicted_quantum_yield": prediction.get(
@@ -311,7 +311,7 @@ def prediction_results_exist(client: SupabaseRestClient, job_id: str) -> bool:
         "prediction_results",
         {
             "select": "id",
-            "prediction_job_id": f"eq.{job_id}",
+            "job_id": f"eq.{job_id}",
             "limit": 1,
         },
     )
