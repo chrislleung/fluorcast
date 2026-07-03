@@ -16,7 +16,7 @@ from sklearn.linear_model import LogisticRegression, RidgeCV
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-REGRESSION_TARGETS = {"emission_nm", "quantum_yield"}
+REGRESSION_TARGETS = {"absorption_nm", "emission_nm", "quantum_yield"}
 DEFAULT_BRIGHT_THRESHOLD = 0.10
 
 
@@ -64,7 +64,7 @@ def train_hybrid_ensemble(
         "bright_threshold": float(bright_threshold),
     }
     if target_name == "quantum_yield":
-        classes = (y.loc[valid] >= bright_threshold).astype(int)
+        classes = (y.loc[valid] > bright_threshold).astype(int)
         counts = classes.value_counts()
         if len(counts) == 2 and int(counts.min()) >= 2:
             model["classifier"] = _classification_pipeline(min(5, int(counts.min()))).fit(

@@ -60,10 +60,72 @@ def load_examples(paths: list[Path], target_column: str) -> tuple[list[pd.DataFr
     return tables, pd.Series(labels, dtype=float)
 
 
+def _wide_features(
+    table: pd.DataFrame, target_column: str
+) -> tuple[pd.DataFrame, pd.Series] | None:
+    """Return row-wise wide features when a table clearly has that format."""
+    if target_column not in table or len(table) <= 1:
+        return None
+    feature_columns = [
+        column
+        for column in table.select_dtypes(include=["number", "bool"]).columns
+        if column != target_column
+    ]
+    if not feature_columns:
+        raise ValueError(
+            f"Wide training table has no usable numeric features other than {target_column!r}"
+        )
+    labels = pd.to_numeric(table[target_column], errors="coerce")
+    valid_target = labels.notna() & np.isfinite(labels)
+    features = table.loc[valid_target, feature_columns].copy()
+    features = features.apply(pd.to_numeric, errors="coerce").replace([np.inf, -np.inf], np.nan)
+    labels = labels.loc[valid_target].astype(float)
+    usable_columns = [column for column in feature_columns if features[column].notna().any()]
+    if not usable_columns:
+        raise ValueError(
+            f"Wide training table has no usable numeric features other than {target_column!r}"
+        )
+    if features.empty:
+        raise ValueError(f"Wide training table has no finite {target_column!r} labels")
+    return features.loc[:, usable_columns].reset_index(drop=True), labels.reset_index(drop=True)
+
+
+def load_training_data(
+    paths: list[Path], target_column: str
+) -> tuple[pd.DataFrame, pd.Series, str]:
+    """Load wide row-wise tables, falling back to legacy per-example tables."""
+    feature_parts: list[pd.DataFrame] = []
+    label_parts: list[pd.Series] = []
+    formats: set[str] = set()
+    for path in paths:
+        table = pd.read_csv(path)
+        if target_column not in table:
+            raise ValueError(f"{path} does not contain target column {target_column!r}")
+        wide = _wide_features(table, target_column)
+        if wide is not None:
+            features, labels = wide
+            formats.add("wide")
+        else:
+            legacy_tables, labels = load_examples([path], target_column)
+            features = build_meta_feature_table(legacy_tables)
+            formats.add("legacy")
+        feature_parts.append(features)
+        label_parts.append(labels)
+    if not feature_parts:
+        raise ValueError("No prediction CSV files were supplied")
+    features = pd.concat(feature_parts, ignore_index=True, sort=False)
+    labels = pd.concat(label_parts, ignore_index=True)
+    if features.shape[1] == 0 or not features.notna().any().any():
+        raise ValueError("Training data has no usable numeric feature columns")
+    input_format = next(iter(formats)) if len(formats) == 1 else "mixed"
+    return features, labels, input_format
+
+
 def main() -> int:
     args = parse_args()
-    tables, labels = load_examples(args.prediction_csv, args.target_column)
-    features = build_meta_feature_table(tables)
+    features, labels, input_format = load_training_data(
+        args.prediction_csv, args.target_column
+    )
     if len(features) < 5:
         raise ValueError("At least five out-of-fold examples are required for split calibration")
 
@@ -95,6 +157,11 @@ def main() -> int:
             "n_calibration_examples": int(len(calibration_indices)),
             "conformal_coverage": args.coverage,
             "source_files": [str(path) for path in args.prediction_csv],
+            "input_format": input_format,
+            "n_dropped_missing_targets": sum(
+                int(pd.to_numeric(pd.read_csv(path)[args.target_column], errors="coerce").isna().sum())
+                for path in args.prediction_csv
+            ),
         },
     )
     return 0

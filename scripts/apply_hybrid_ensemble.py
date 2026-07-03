@@ -19,7 +19,7 @@ from chemfluor.hybrid.ensemble import (  # noqa: E402
     predict_hybrid_ensemble,
 )
 from chemfluor.hybrid.explanation import summarize_prediction  # noqa: E402
-from chemfluor.hybrid.meta_features import build_meta_features  # noqa: E402
+from chemfluor.hybrid.meta_features import add_wide_feature_aliases, build_meta_features  # noqa: E402
 from chemfluor.hybrid.report import (  # noqa: E402
     build_hybrid_report,
     load_prediction_table,
@@ -42,7 +42,10 @@ def main() -> int:
     args = parse_args()
     predictions = load_prediction_table(args.prediction_csv)
     model, columns, metadata = load_hybrid_ensemble(args.model_dir)
-    features = align_features(build_meta_features(predictions), columns)
+    raw_features = add_wide_feature_aliases(
+        build_meta_features(predictions), str(model["target_name"])
+    )
+    features = align_features(raw_features, columns)
     hybrid = predict_hybrid_ensemble(model, features)
     confidence_value = features.get("overall_confidence_score")
     confidence = None if confidence_value is None else float(confidence_value.iloc[0])

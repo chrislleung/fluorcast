@@ -7,10 +7,16 @@ from .report import (
     render_report_markdown,
     write_report_json,
 )
-from .meta_features import build_meta_feature_row, build_meta_feature_table, build_meta_features
+from .meta_features import (
+    add_wide_feature_aliases,
+    build_meta_feature_row,
+    build_meta_feature_table,
+    build_meta_features,
+)
 
 __all__ = [
     "build_hybrid_report",
+    "add_wide_feature_aliases",
     "build_meta_feature_row",
     "build_meta_feature_table",
     "build_meta_features",

@@ -80,3 +80,20 @@ def build_meta_feature_table(tables: Iterable[pd.DataFrame]) -> pd.DataFrame:
     """Build an aligned feature matrix from multiple prediction examples."""
     rows = [build_meta_feature_row(table) for table in tables]
     return pd.DataFrame(rows, dtype=float)
+
+
+def add_wide_feature_aliases(features: pd.DataFrame, target: str) -> pd.DataFrame:
+    """Add builder-style names used by wide meta-training tables."""
+    if target not in TARGET_COLUMNS:
+        raise ValueError(f"Unsupported target: {target}")
+    result = features.copy()
+    for statistic in STATISTICS:
+        source = f"{target}_{statistic}"
+        if source in result:
+            result[f"prediction_{statistic}"] = result[source]
+    model_prefix = f"{target}_model_"
+    for column in list(result.columns):
+        if column.startswith(model_prefix):
+            model = column[len(model_prefix) :]
+            result[f"{model}_{target}"] = result[column]
+    return result
