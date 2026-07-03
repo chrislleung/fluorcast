@@ -1,0 +1,23 @@
+{
+  "job_id": "job-example-001",
+  "status": "success",
+  "canonical_molecule_smiles": "c1ccccc1",
+  "canonical_solvent_smiles": "CCO",
+  "predictions": [
+    {
+      "model_name": "rf",
+      "predicted_emission_nm": 450.0,
+      "predicted_quantum_yield": 0.2,
+      "nearest_training_similarity": 0.8,
+      "nearest_training_smiles": "c1ccccc1",
+      "warnings": []
+    }
+  ],
+  "applicability_domain": {
+    "outside_applicability_domain": false,
+    "nearest_training_similarity": 0.8,
+    "nearest_training_smiles": "c1ccccc1",
+    "confidence_label": "high"
+  },
+  "warnings": []
+}

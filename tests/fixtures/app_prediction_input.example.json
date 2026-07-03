@@ -1,0 +1,8 @@
+{
+  "job_id": "job-example-001",
+  "user_id": "user-example-001",
+  "molecule_smiles": "c1ccccc1",
+  "solvent_smiles": "CCO",
+  "model_choice": "all",
+  "requested_at": "2026-07-03T14:30:00Z"
+}

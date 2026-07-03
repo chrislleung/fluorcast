@@ -1,0 +1,13 @@
+{
+  "job_id": "job-example-002",
+  "status": "failed",
+  "canonical_molecule_smiles": null,
+  "canonical_solvent_smiles": null,
+  "predictions": [],
+  "applicability_domain": null,
+  "warnings": [],
+  "error": {
+    "code": "INVALID_INPUT",
+    "message": "Missing required field(s): molecule_smiles"
+  }
+}
