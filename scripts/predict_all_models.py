@@ -42,13 +42,15 @@ DEFAULT_TREE_MODEL_DIR = Path("models/experiments_fluodb")
 DEFAULT_NEURAL_MODEL_DIR = Path("models/neural_experiments_fluodb")
 DEFAULT_GRAPH_MODEL_DIR = Path("models/graph_experiments_fluodb")
 DEFAULT_APPLICABILITY_THRESHOLD = 0.50
-PREDICTION_TARGETS = ["emission_nm", "quantum_yield"]
+PREDICTION_TARGETS = ["absorption_nm", "emission_nm", "quantum_yield"]
 OUTPUT_COLUMNS = [
     "model",
     "model_family",
     "seed",
+    "predicted_absorption_nm",
     "predicted_emission_nm",
     "predicted_quantum_yield",
+    "absorption_abs_error_nm",
     "emission_abs_error_nm",
     "quantum_yield_abs_error",
     "nearest_training_similarity",
@@ -92,6 +94,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--out", default=None, type=Path, help="Optional CSV output path.")
     parser.add_argument("--known-emission-nm", default=None, type=float)
+    parser.add_argument("--known-absorption-nm", default=None, type=float)
     parser.add_argument("--known-quantum-yield", default=None, type=float)
     parser.add_argument(
         "--applicability-threshold",
@@ -466,8 +469,10 @@ def rows_for_model(
     domain: dict[str, Any],
     known_emission_nm: float | None = None,
     known_quantum_yield: float | None = None,
+    known_absorption_nm: float | None = None,
 ) -> list[dict[str, Any]]:
     """Create one output row per model/configuration."""
+    absorption = predictions.get("absorption_nm")
     emission = predictions.get("emission_nm")
     qy = predictions.get("quantum_yield")
     return [
@@ -475,8 +480,14 @@ def rows_for_model(
             "model": model,
             "model_family": model_family,
             "seed": seed,
+            "predicted_absorption_nm": absorption,
             "predicted_emission_nm": emission,
             "predicted_quantum_yield": qy,
+            "absorption_abs_error_nm": (
+                None
+                if absorption is None or known_absorption_nm is None
+                else abs(float(absorption) - float(known_absorption_nm))
+            ),
             "emission_abs_error_nm": (
                 None
                 if emission is None or known_emission_nm is None
@@ -703,6 +714,7 @@ def collect_predictions(args: argparse.Namespace) -> tuple[pd.DataFrame, list[st
                 domain,
                 args.known_emission_nm,
                 args.known_quantum_yield,
+                getattr(args, "known_absorption_nm", None),
             )
         )
 
@@ -727,6 +739,7 @@ def collect_predictions(args: argparse.Namespace) -> tuple[pd.DataFrame, list[st
                 domain,
                 args.known_emission_nm,
                 args.known_quantum_yield,
+                getattr(args, "known_absorption_nm", None),
             )
         )
 
@@ -751,6 +764,7 @@ def collect_predictions(args: argparse.Namespace) -> tuple[pd.DataFrame, list[st
                 domain,
                 args.known_emission_nm,
                 args.known_quantum_yield,
+                getattr(args, "known_absorption_nm", None),
             )
         )
 

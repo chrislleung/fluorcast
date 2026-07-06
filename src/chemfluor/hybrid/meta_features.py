@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 TARGET_COLUMNS = {
+    "absorption_nm": ("predicted_absorption_nm", "absorption_nm"),
     "emission_nm": ("predicted_emission_nm", "emission_nm"),
     "quantum_yield": ("predicted_quantum_yield", "quantum_yield"),
 }
