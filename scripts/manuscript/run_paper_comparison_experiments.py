@@ -1,4 +1,9 @@
-"""Run reproducible experiments for the FluorCast manuscript comparison."""
+"""Run reproducible experiments for the FluorCast manuscript comparison.
+
+Smoke-test example::
+
+    python scripts/manuscript/run_paper_comparison_experiments.py --max-rows 200 --models rf --targets stokes_shift_nm --splits random --seeds 0 --out-dir outputs/paper_comparison_stokes_smoke
+"""
 
 from __future__ import annotations
 
@@ -42,7 +47,12 @@ DEFAULT_COMBINED = Path("data/processed/fluodb_lite/combined_deduplicated.csv")
 DEFAULT_SOLVENTS = Path("data/solvent_descriptors_expanded_deep4chem.csv")
 DEFAULT_OUT_DIR = Path("outputs/paper_comparison")
 VALID_MODELS = {"rf", "extratrees", "histgb", "gbdt", "mlp"}
-VALID_TARGETS = {"absorption_nm", "emission_nm", "quantum_yield"}
+VALID_TARGETS = {
+    "absorption_nm",
+    "emission_nm",
+    "quantum_yield",
+    "stokes_shift_nm",
+}
 VALID_SPLITS = {"random", "molecule", "scaffold"}
 IDENTITY_COLUMNS = [
     "canonical_chromophore_smiles",
@@ -69,7 +79,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--out-dir", type=Path, default=DEFAULT_OUT_DIR)
     parser.add_argument("--models", default="rf,extratrees,histgb,gbdt,mlp")
     parser.add_argument(
-        "--targets", default="absorption_nm,emission_nm,quantum_yield"
+        "--targets",
+        default="absorption_nm,emission_nm,quantum_yield,stokes_shift_nm",
     )
     parser.add_argument("--splits", default="random,molecule,scaffold")
     parser.add_argument("--seeds", default="0,1,2")
@@ -92,6 +103,21 @@ def validate_options(
     messages = [f"{key}: {values}" for key, values in invalid.items() if values]
     if messages:
         raise ValueError("Unknown options: " + "; ".join(messages))
+
+
+def add_stokes_shift_target(rows: pd.DataFrame) -> pd.DataFrame:
+    """Derive the non-negative wavelength Stokes shift when both inputs exist."""
+    derived = rows.copy()
+    if {"absorption_nm", "emission_nm"}.issubset(derived.columns):
+        absorption = pd.to_numeric(derived["absorption_nm"], errors="coerce")
+        emission = pd.to_numeric(derived["emission_nm"], errors="coerce")
+        stokes_shift = emission - absorption
+        derived["stokes_shift_nm"] = stokes_shift.where(
+            absorption.notna() & emission.notna() & stokes_shift.ge(0)
+        )
+    else:
+        derived["stokes_shift_nm"] = np.nan
+    return derived
 
 
 def markdown_table(frame: pd.DataFrame) -> str:
@@ -485,6 +511,7 @@ def main() -> int:
         args.out_dir.mkdir(parents=True, exist_ok=True)
 
         full_rows = trainer.load_standardized_combined(args.standardized_combined)
+        full_rows = add_stokes_shift_target(full_rows)
         write_dataset_audit(full_rows, args.standardized_combined, args.out_dir)
         dataset_figures(full_rows, args.out_dir / "figures")
 
