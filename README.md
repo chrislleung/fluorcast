@@ -193,32 +193,42 @@ git pull origin main
 
 ## Slurm Script Organization
 
-Most users should run the current full hybrid prediction workflow:
+Most prediction users should run the full hybrid prediction workflow:
 
 ```bash
 sbatch slurm/run_predict_full_fluorcast.sbatch
 ```
 
+Most experiment users should use the hybrid and paired spectral workflows under
+`slurm/`.
+
 The Slurm folders are organized by purpose:
 
 ```text
-slurm/              current recommended FluorCast workflows
-slurm/base_models/  original RF, ExtraTrees, MLP, and graph-only workflows for reproducibility, comparison, and retraining
-slurm/legacy/       older archived workflows not recommended for routine use
+slurm/              Current recommended workflows and app-facing jobs
+slurm/base_models/  Original RF, ExtraTrees, MLP, and graph-only workflows
+slurm/legacy/       Archived older workflows kept for reproducibility
 ```
 
 Production hybrid artifacts live on Nibi under `models/production_hybrid/` and
 should not be committed.
 
-## Run Training
+## Run Full Experiments on Nibi
 
-Training should be run with Slurm, not directly on the login node.
+Training and full experiments should be run with Slurm, not directly on the
+login node. The current recommended path is the hybrid workflow in `slurm/`.
+The original base-model workflows remain supported in `slurm/base_models/` for
+reproducibility, comparison, and retraining.
 
-The Slurm scripts are already included in the GitHub repository, so you do not need to create or paste them manually.
+The Slurm scripts are already included in the GitHub repository, so you do not
+need to create or paste them manually.
 
-### 1. Tree Model Experiments
+### 1. Base Tree Model Experiments
 
 This trains RF, ExtraTrees, HistGB, and GBDT on emission and quantum yield.
+This original base-model wrapper currently reproduces the emission/QY baseline
+experiments. Absorption and paired spectral/Stokes workflows are handled by the
+hybrid and paired spectral scripts below.
 
 ```bash
 cd ~/scratch/ChemFluor_Project
@@ -266,7 +276,7 @@ outputs/neural_model_experiments_fluodb/
 
 ---
 
-### 3. GPU Graph Neural Network Experiments
+### 3. GPU Graph-Only Experiments
 
 Graph models should be run on GPU.
 
@@ -317,26 +327,125 @@ outputs/graph_gcn_qy_gpu/
 
 ---
 
-### 4. All-Model Prediction Job
+### 4. Hybrid Three-Way Experiments
 
-The prediction Slurm script is also included.
+Hybrid experiments train base models on one split, train the hybrid ensemble on
+a second split, and evaluate only on the final held-out split. Run one target
+and split at a time.
 
 ```bash
 cd ~/scratch/ChemFluor_Project
-sbatch slurm/base_models/run_predict_all_models.sbatch
+
+export FLUORCAST_TARGET_NAME="absorption_nm"
+export FLUORCAST_SPLIT_TYPE="molecule"
+export FLUORCAST_SEED="0"
+export FLUORCAST_OUT_DIR="outputs/hybrid_three_way/molecule/absorption_nm"
+export FLUORCAST_MODEL_OUT_DIR="models/production_hybrid/absorption_nm"
+sbatch slurm/run_hybrid_three_way_experiment.sbatch
 ```
 
-Outputs:
+Repeat for the other production targets by changing both FLUORCAST_TARGET_NAME
+and FLUORCAST_MODEL_OUT_DIR:
+```bash
+export FLUORCAST_TARGET_NAME="emission_nm"
+export FLUORCAST_MODEL_OUT_DIR="models/production_hybrid/emission_nm"
+sbatch slurm/run_hybrid_three_way_experiment.sbatch
+
+export FLUORCAST_TARGET_NAME="quantum_yield"
+export FLUORCAST_MODEL_OUT_DIR="models/production_hybrid/quantum_yield"
+sbatch slurm/run_hybrid_three_way_experiment.sbatch
+```
+
+For scaffold or comparison experiments, write to split-specific folders so
+production models are not overwritten:
+```bash
+export FLUORCAST_TARGET_NAME="absorption_nm"
+export FLUORCAST_SPLIT_TYPE="scaffold"
+export FLUORCAST_SEED="0"
+export FLUORCAST_OUT_DIR="outputs/hybrid_three_way/scaffold/absorption_nm"
+export FLUORCAST_MODEL_OUT_DIR="models/hybrid_three_way/scaffold/absorption_nm"
+sbatch slurm/run_hybrid_three_way_experiment.sbatch
+```
+Repeat by changing FLUORCAST_TARGET_NAME to emission_nm or quantum_yield.
+
+Production hybrid artifacts should be staged on Nibi as:
 
 ```text
-outputs/predictions/
-outputs/slurm/
+models/production_hybrid/absorption_nm/
+models/production_hybrid/emission_nm/
+models/production_hybrid/quantum_yield/
 ```
 
-## Run All-Model Prediction
+Do not commit these trained model artifacts.
 
-Use `scripts/predict_all_models.py` after trained model artifacts exist.
+---
 
+### 5. Paired Absorption/Emission Stokes Experiments
+
+Paired spectral experiments use the same molecule-solvent rows for absorption
+and emission, then calculate Stokes shift from those paired predictions. Stokes
+shift is not directly modeled in this workflow.
+
+```bash
+cd ~/scratch/ChemFluor_Project
+
+export FLUORCAST_SPLIT_TYPE="molecule"
+export FLUORCAST_SEED="0"
+export FLUORCAST_OUT_DIR="outputs/paired_stokes_three_way/molecule"
+export FLUORCAST_MODEL_OUT_DIR="models/paired_stokes_three_way/molecule"
+sbatch slurm/run_paired_spectral_three_way_experiment.sbatch
+```
+
+For scaffold splits:
+
+```bash
+export FLUORCAST_SPLIT_TYPE="scaffold"
+export FLUORCAST_OUT_DIR="outputs/paired_stokes_three_way/scaffold"
+export FLUORCAST_MODEL_OUT_DIR="models/paired_stokes_three_way/scaffold"
+sbatch slurm/run_paired_spectral_three_way_experiment.sbatch
+```
+
+Convenience wrappers run paired absorption/emission/Stokes plus QY for the
+molecule and scaffold splits:
+
+```bash
+sbatch slurm/run_full_paired_molecule.sbatch
+sbatch slurm/run_full_paired_scaffold.sbatch
+```
+
+## Predicting New Molecules
+
+### Full hybrid prediction, recommended
+
+The preferred end-to-end workflow predicts absorption, emission, quantum yield,
+calculates Stokes shift from the paired absorption/emission predictions, and
+writes full JSON and Markdown reports.
+
+```bash
+cd ~/scratch/ChemFluor_Project
+
+export FLUORCAST_SMILES="YOUR_CHROMOPHORE_SMILES"
+export FLUORCAST_SOLVENT_SMILES="YOUR_SOLVENT_SMILES"
+export FLUORCAST_OUT_DIR="outputs/predictions/example_full"
+
+sbatch slurm/run_predict_full_fluorcast.sbatch
+```
+
+Production hybrid model artifacts are expected on Nibi under:
+
+```text
+models/production_hybrid/absorption_nm/
+models/production_hybrid/emission_nm/
+models/production_hybrid/quantum_yield/
+```
+
+Override those locations with `FLUORCAST_ABS_HYBRID_DIR`,
+`FLUORCAST_EM_HYBRID_DIR`, and `FLUORCAST_QY_HYBRID_DIR`. These directories
+contain trained model artifacts and should not be committed.
+
+### Base-model comparison prediction
+
+Use `scripts/predict_all_models.py` after trained base-model artifacts exist.
 For the prepared benchmark/presentation prediction, use the included Slurm script:
 
 ```bash
@@ -376,35 +485,7 @@ confidence_label
 outside_applicability_domain
 ```
 
-## Predicting a new molecule with the full hybrid workflow
-
-The preferred end-to-end workflow predicts absorption, emission, quantum yield,
-calculates Stokes shift from the paired absorption/emission predictions, and
-writes full JSON and Markdown reports.
-
-```bash
-cd ~/scratch/ChemFluor_Project
-
-export FLUORCAST_SMILES="YOUR_CHROMOPHORE_SMILES"
-export FLUORCAST_SOLVENT_SMILES="YOUR_SOLVENT_SMILES"
-export FLUORCAST_OUT_DIR="outputs/predictions/example_full"
-
-sbatch slurm/run_predict_full_fluorcast.sbatch
-```
-
-Production hybrid model artifacts are expected on Nibi under:
-
-```text
-models/production_hybrid/absorption_nm/
-models/production_hybrid/emission_nm/
-models/production_hybrid/quantum_yield/
-```
-
-Override those locations with `FLUORCAST_ABS_HYBRID_DIR`,
-`FLUORCAST_EM_HYBRID_DIR`, and `FLUORCAST_QY_HYBRID_DIR`. These directories
-contain trained model artifacts and should not be committed.
-
-## Desktop app JSON prediction
+### Desktop app JSON prediction
 
 The desktop-app runner accepts `model_choice: "hybrid"` and returns one full
 FluorCast prediction record.
@@ -437,8 +518,17 @@ outputs/model_experiments_fluodb/
 outputs/neural_model_experiments_fluodb/
 outputs/graph_gin_emission_3seeds_gpu/
 outputs/graph_gcn_emission_3seeds_gpu/
+outputs/hybrid_three_way/
+outputs/paired_stokes_three_way/
+outputs/paired_spectral_three_way/
 outputs/predictions/
-models/
+models/production_hybrid/
+models/paired_stokes_three_way/
+models/hybrid_three_way/
+models/experiments_fluodb/
+models/neural_experiments_fluodb/
+models/graph_gin_emission_3seeds_gpu/
+models/graph_gcn_emission_3seeds_gpu/
 ```
 
 Useful commands:
@@ -447,6 +537,10 @@ Useful commands:
 cat outputs/model_experiments_fluodb/model_comparison.md
 cat outputs/neural_model_experiments_fluodb/all_model_comparison.md
 cat outputs/graph_seed_summary_grouped.csv
+cat outputs/hybrid_three_way/*/*/metrics_summary.md
+cat outputs/paired_stokes_three_way/*/paired_spectral_metrics_summary.md
+cat outputs/paired_spectral_three_way/*/*/paired_spectral_metrics_summary.md
+cat outputs/predictions/example_full/full_fluorcast_report.md
 cat outputs/predictions/difficult_benchmark_all_models_with_graphs_and_qy.csv
 ```
 
@@ -585,4 +679,3 @@ python scripts/check_molecule_in_dataset.py \
 
 Use `--smiles-column` and `--solvent-column` for datasets with nonstandard column
 names. Invalid dataset SMILES are skipped and counted in the terminal summary.
-

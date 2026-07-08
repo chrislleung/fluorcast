@@ -3,18 +3,43 @@
 #SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --output=logs/%x-%j.out
-#SBATCH --error=logs/%x-%j.err
+#SBATCH --output=outputs/slurm/%x-%j.out
+#SBATCH --error=outputs/slurm/%x-%j.err
 
 set -euo pipefail
 
-cd /home/chrisl/scratch/ChemFluor_Project
+PROJECT_ROOT="${FLUORCAST_REPO:-${SLURM_SUBMIT_DIR:-}}"
+if [[ -z "$PROJECT_ROOT" || ! -d "$PROJECT_ROOT" ]]; then
+    echo "Could not locate the FluorCast repository." >&2
+    echo "Submit from the project root or set FLUORCAST_REPO." >&2
+    exit 2
+fi
+
+cd "$PROJECT_ROOT"
 
 module purge
-module load python/3.11.5
-module load gcc rdkit
+module load python/3.11
+module load gcc
+module load rdkit
 
-source .venv/bin/activate
+if [[ -n "${FLUORCAST_ACTIVATE:-}" ]]; then
+    if [[ ! -f "$FLUORCAST_ACTIVATE" ]]; then
+        echo "Environment activation script does not exist: $FLUORCAST_ACTIVATE" >&2
+        exit 2
+    fi
+    # shellcheck disable=SC1090
+    source "$FLUORCAST_ACTIVATE"
+elif [[ -f "$HOME/scratch/chemfluor_env/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source "$HOME/scratch/chemfluor_env/bin/activate"
+elif [[ -f .venv/bin/activate ]]; then
+    # shellcheck disable=SC1091
+    source .venv/bin/activate
+else
+    echo "No virtual environment found; using python from the loaded modules." >&2
+fi
+
+mkdir -p outputs/slurm logs
 
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
 export MKL_NUM_THREADS="${SLURM_CPUS_PER_TASK}"
