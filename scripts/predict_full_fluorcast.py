@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -36,6 +37,13 @@ REPORT_STEMS = {
     "emission_nm": "emission",
     "quantum_yield": "quantum_yield",
 }
+DEFAULT_ABS_HYBRID_DIR = PROJECT_ROOT / "models" / "production_hybrid" / "absorption_nm"
+DEFAULT_EM_HYBRID_DIR = PROJECT_ROOT / "models" / "production_hybrid" / "emission_nm"
+DEFAULT_QY_HYBRID_DIR = PROJECT_ROOT / "models" / "production_hybrid" / "quantum_yield"
+
+
+def _hybrid_dir_from_env(name: str, default: Path) -> Path:
+    return Path(os.environ.get(name, str(default)))
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -46,9 +54,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--tree-model-dir", type=Path, default=predict_all_models.DEFAULT_TREE_MODEL_DIR)
     parser.add_argument("--neural-model-dir", type=Path, default=predict_all_models.DEFAULT_NEURAL_MODEL_DIR)
     parser.add_argument("--graph-model-dirs", nargs="*", type=Path)
-    parser.add_argument("--absorption-hybrid-model-dir", type=Path)
-    parser.add_argument("--emission-hybrid-model-dir", type=Path)
-    parser.add_argument("--quantum-yield-hybrid-model-dir", type=Path)
+    parser.add_argument(
+        "--absorption-hybrid-model-dir",
+        type=Path,
+        default=_hybrid_dir_from_env("FLUORCAST_ABS_HYBRID_DIR", DEFAULT_ABS_HYBRID_DIR),
+    )
+    parser.add_argument(
+        "--emission-hybrid-model-dir",
+        type=Path,
+        default=_hybrid_dir_from_env("FLUORCAST_EM_HYBRID_DIR", DEFAULT_EM_HYBRID_DIR),
+    )
+    parser.add_argument(
+        "--quantum-yield-hybrid-model-dir",
+        type=Path,
+        default=_hybrid_dir_from_env("FLUORCAST_QY_HYBRID_DIR", DEFAULT_QY_HYBRID_DIR),
+    )
     parser.add_argument("--skip-hybrid", action="store_true")
     parser.add_argument("--known-absorption-nm", type=float)
     parser.add_argument("--known-emission-nm", type=float)

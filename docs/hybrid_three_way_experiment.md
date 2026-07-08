@@ -16,10 +16,32 @@ Full experiment:
 
 ```powershell
 python scripts/run_hybrid_three_way_experiment.py `
-  --target-name quantum_yield --split-type scaffold --seed 0 `
+  --target-name absorption_nm --split-type scaffold --seed 0 `
   --models rf extratrees histgb gbdt mlp `
-  --out-dir outputs/hybrid_three_way/scaffold/quantum_yield `
-  --model-out-dir models/hybrid_three_way/scaffold/quantum_yield
+  --out-dir outputs/hybrid_three_way/scaffold/absorption_nm `
+  --model-out-dir models/production_hybrid/absorption_nm
 ```
 
 Use `--standardized-combined data/processed/fluodb_lite/combined_deduplicated.csv` to select an existing standardized dataset explicitly, and `--solvent-descriptors` to override the default descriptor table.
+
+Nibi Slurm submission:
+
+```bash
+export FLUORCAST_TARGET_NAME="absorption_nm"
+export FLUORCAST_SPLIT_TYPE="scaffold"
+export FLUORCAST_SEED="0"
+export FLUORCAST_OUT_DIR="outputs/hybrid_three_way/scaffold/absorption_nm"
+export FLUORCAST_MODEL_OUT_DIR="models/production_hybrid/absorption_nm"
+sbatch slurm/run_hybrid_three_way_experiment.sbatch
+```
+
+Repeat with `FLUORCAST_TARGET_NAME=emission_nm` and
+`FLUORCAST_TARGET_NAME=quantum_yield` to build the full production layout:
+
+```text
+models/production_hybrid/absorption_nm/
+models/production_hybrid/emission_nm/
+models/production_hybrid/quantum_yield/
+```
+
+These trained artifacts live on Nibi and are intentionally excluded from Git.

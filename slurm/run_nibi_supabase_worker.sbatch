@@ -19,17 +19,22 @@ set -a
 source "$FLUORCAST_WORKER_ENV"
 set +a
 
-: "${FLUORCAST_REPO:?FLUORCAST_REPO must point to the FluorCast repository}"
 : "${FLUORCAST_JOBS_DIR:?FLUORCAST_JOBS_DIR must point to the jobs directory}"
 : "${SUPABASE_URL:?SUPABASE_URL must be set}"
 : "${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY must be set}"
 
-if [[ ! -d "$FLUORCAST_REPO" ]]; then
-    echo "FluorCast repository directory does not exist: $FLUORCAST_REPO" >&2
+PROJECT_ROOT="${FLUORCAST_REPO:-${SLURM_SUBMIT_DIR:-}}"
+if [[ -z "$PROJECT_ROOT" || ! -d "$PROJECT_ROOT" ]]; then
+    echo "Could not locate the FluorCast repository." >&2
+    echo "Submit from the project root or set FLUORCAST_REPO." >&2
     exit 2
 fi
 
-cd "$FLUORCAST_REPO"
+cd "$PROJECT_ROOT"
+module purge
+module load python/3.11
+module load gcc
+module load rdkit
 
 if [[ -n "${FLUORCAST_ACTIVATE:-}" ]]; then
     if [[ ! -f "$FLUORCAST_ACTIVATE" ]]; then
@@ -38,11 +43,14 @@ if [[ -n "${FLUORCAST_ACTIVATE:-}" ]]; then
     fi
     # shellcheck disable=SC1090
     source "$FLUORCAST_ACTIVATE"
+elif [[ -f "$HOME/scratch/chemfluor_env/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source "$HOME/scratch/chemfluor_env/bin/activate"
 elif [[ -f .venv/bin/activate ]]; then
     # shellcheck disable=SC1091
     source .venv/bin/activate
 else
-    echo "No .venv found; using python from PATH. Set FLUORCAST_ACTIVATE to customize activation." >&2
+    echo "No virtual environment found; using python from the loaded modules." >&2
 fi
 
 python scripts/nibi_supabase_worker.py \

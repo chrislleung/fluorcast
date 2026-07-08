@@ -55,10 +55,14 @@ def main() -> int:
 
     report = build_hybrid_report(predictions)
     target = str(model["target_name"])
-    if target == "emission_nm":
-        report["final_emission_prediction_nm"] = hybrid["prediction"]
-    else:
-        report["final_quantum_yield_prediction"] = hybrid["prediction"]
+    target_fields = {
+        "absorption_nm": "final_absorption_prediction_nm",
+        "emission_nm": "final_emission_prediction_nm",
+        "quantum_yield": "final_quantum_yield_prediction",
+    }
+    if target not in target_fields:
+        raise ValueError(f"Unsupported hybrid target: {target}")
+    report[target_fields[target]] = hybrid["prediction"]
     report["hybrid_ensemble"] = {
         "target": target,
         "prediction": hybrid["prediction"],

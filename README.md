@@ -1,9 +1,9 @@
-# FluorCast
+﻿# FluorCast
 
 FluorCast is a solvent-aware machine learning workflow for predicting fluorescent molecule properties from:
 
 ```text
-chromophore SMILES + solvent SMILES/name → emission wavelength + quantum yield
+chromophore SMILES + solvent SMILES/name -> absorption wavelength, emission wavelength, calculated Stokes shift, quantum yield, and brightness class
 ```
 
 This README covers the current combined workflow with datasets:
@@ -191,6 +191,25 @@ If any file is missing, pull the latest repository version:
 git pull origin main
 ```
 
+## Slurm Script Organization
+
+Most users should run the current full hybrid prediction workflow:
+
+```bash
+sbatch slurm/run_predict_full_fluorcast.sbatch
+```
+
+The Slurm folders are organized by purpose:
+
+```text
+slurm/              current recommended FluorCast workflows
+slurm/base_models/  original RF, ExtraTrees, MLP, and graph-only workflows for reproducibility, comparison, and retraining
+slurm/legacy/       older archived workflows not recommended for routine use
+```
+
+Production hybrid artifacts live on Nibi under `models/production_hybrid/` and
+should not be committed.
+
 ## Run Training
 
 Training should be run with Slurm, not directly on the login node.
@@ -203,7 +222,7 @@ This trains RF, ExtraTrees, HistGB, and GBDT on emission and quantum yield.
 
 ```bash
 cd ~/scratch/ChemFluor_Project
-sbatch run_model_experiments_fluodb.sh
+sbatch slurm/base_models/run_model_experiments_fluodb.sbatch
 ```
 
 Monitor:
@@ -228,7 +247,7 @@ This trains MLP baselines and compares them with the tree-model results.
 
 ```bash
 cd ~/scratch/ChemFluor_Project
-sbatch run_neural_experiments.sh
+sbatch slurm/base_models/run_neural_experiments.sbatch
 ```
 
 Monitor:
@@ -254,26 +273,26 @@ Graph models should be run on GPU.
 Main graph experiment scripts already included in the repo:
 
 ```text
-run_graph_gin_emission_3seeds_gpu.sh
-run_graph_gcn_emission_3seeds_gpu.sh
-run_graph_gin_qy_gpu.sh
-run_graph_gcn_qy_gpu.sh
-run_graph_gin_mpnn_emission_gpu.sh
+slurm/base_models/run_graph_gin_emission_3seeds_gpu.sbatch
+slurm/base_models/run_graph_gcn_emission_3seeds_gpu.sbatch
+slurm/base_models/run_graph_gin_qy_gpu.sbatch
+slurm/base_models/run_graph_gcn_qy_gpu.sbatch
+slurm/base_models/run_graph_gin_mpnn_emission_gpu.sbatch
 ```
 
 Recommended emission stability runs:
 
 ```bash
 cd ~/scratch/ChemFluor_Project
-sbatch run_graph_gin_emission_3seeds_gpu.sh
-sbatch run_graph_gcn_emission_3seeds_gpu.sh
+sbatch slurm/base_models/run_graph_gin_emission_3seeds_gpu.sbatch
+sbatch slurm/base_models/run_graph_gcn_emission_3seeds_gpu.sbatch
 ```
 
 Optional graph QY runs:
 
 ```bash
-sbatch run_graph_gin_qy_gpu.sh
-sbatch run_graph_gcn_qy_gpu.sh
+sbatch slurm/base_models/run_graph_gin_qy_gpu.sbatch
+sbatch slurm/base_models/run_graph_gcn_qy_gpu.sbatch
 ```
 
 Monitor:
@@ -304,7 +323,7 @@ The prediction Slurm script is also included.
 
 ```bash
 cd ~/scratch/ChemFluor_Project
-sbatch run_predict_all_models.sh
+sbatch slurm/base_models/run_predict_all_models.sbatch
 ```
 
 Outputs:
@@ -322,7 +341,7 @@ For the prepared benchmark/presentation prediction, use the included Slurm scrip
 
 ```bash
 cd ~/scratch/ChemFluor_Project
-sbatch run_predict_all_models.sh
+sbatch slurm/base_models/run_predict_all_models.sbatch
 ```
 
 For a custom molecule, replace the "python scripts/predict_all_models.py..." portion of the script with:
@@ -355,6 +374,58 @@ nearest_training_similarity
 nearest_training_smiles
 confidence_label
 outside_applicability_domain
+```
+
+## Predicting a new molecule with the full hybrid workflow
+
+The preferred end-to-end workflow predicts absorption, emission, quantum yield,
+calculates Stokes shift from the paired absorption/emission predictions, and
+writes full JSON and Markdown reports.
+
+```bash
+cd ~/scratch/ChemFluor_Project
+
+export FLUORCAST_SMILES="YOUR_CHROMOPHORE_SMILES"
+export FLUORCAST_SOLVENT_SMILES="YOUR_SOLVENT_SMILES"
+export FLUORCAST_OUT_DIR="outputs/predictions/example_full"
+
+sbatch slurm/run_predict_full_fluorcast.sbatch
+```
+
+Production hybrid model artifacts are expected on Nibi under:
+
+```text
+models/production_hybrid/absorption_nm/
+models/production_hybrid/emission_nm/
+models/production_hybrid/quantum_yield/
+```
+
+Override those locations with `FLUORCAST_ABS_HYBRID_DIR`,
+`FLUORCAST_EM_HYBRID_DIR`, and `FLUORCAST_QY_HYBRID_DIR`. These directories
+contain trained model artifacts and should not be committed.
+
+## Desktop app JSON prediction
+
+The desktop-app runner accepts `model_choice: "hybrid"` and returns one full
+FluorCast prediction record.
+
+```json
+{
+  "job_id": "job-example-001",
+  "user_id": "user-example-001",
+  "molecule_smiles": "c1ccccc1",
+  "solvent_smiles": "CCO",
+  "model_choice": "hybrid",
+  "requested_at": "2026-07-03T14:30:00Z"
+}
+```
+
+Submit with:
+
+```bash
+export FLUORCAST_INPUT_JSON="jobs/job-example-001/input.json"
+export FLUORCAST_OUTPUT_JSON="jobs/job-example-001/output.json"
+sbatch slurm/run_prediction_job.sbatch
 ```
 
 ## Check Results
@@ -485,10 +556,15 @@ outputs/
 *.err
 ```
 
-Safe commit command:
+Before committing, inspect the working tree and stage only the files you intend
+to include. Avoid broad `git add` commands when generated outputs or local
+artifacts are present.
 
 ```bash
-git add scripts src tests README.md requirements.txt .gitignore
+git status --short
+git diff -- README.md
+git add README.md
+# Repeat git diff and git add only for other files you intentionally changed.
 git commit -m "Update README for FluorCast workflow"
 git push origin main
 ```
@@ -509,3 +585,4 @@ python scripts/check_molecule_in_dataset.py \
 
 Use `--smiles-column` and `--solvent-column` for datasets with nonstandard column
 names. Invalid dataset SMILES are skipped and counted in the terminal summary.
+

@@ -37,9 +37,19 @@ python scripts/run_paired_spectral_three_way_experiment.py `
   --model-out-dir models/paired_stokes_three_way/scaffold
 ```
 
+On Nibi, submit the reusable Slurm wrapper from the repository root:
+
+```bash
+export FLUORCAST_SPLIT_TYPE="scaffold"
+export FLUORCAST_SEED="0"
+export FLUORCAST_OUT_DIR="outputs/paired_stokes_three_way/scaffold"
+export FLUORCAST_MODEL_OUT_DIR="models/production_hybrid/paired_spectral/scaffold"
+sbatch slurm/run_paired_spectral_three_way_experiment.sbatch
+```
+
 ## Outputs
 
-The dataset builder writes the paired CSV and a JSON filtering/statistics audit. The experiment writes split assignments, invalid-row and leakage audits, four base-prediction tables, target-specific evaluated predictions and metric tables, `final_paired_spectral_predictions.csv`, `stokes_metrics_table.csv`, a Markdown metrics summary, and `experiment_config.json`. Saved models are organized under `base_models/<target>/<model>/` and `hybrid_ensemble/<target>/`.
+The dataset builder writes the paired CSV and a JSON filtering/statistics audit. The experiment writes split assignments, invalid-row and leakage audits, four base-prediction tables, target-specific evaluated predictions and metric tables, `final_paired_spectral_predictions.csv`, `stokes_metrics_table.csv`, a Markdown metrics summary, and `experiment_config.json`. Saved models are organized under `base_models/<target>/<model>/` and `hybrid_ensemble/<target>/`. Stokes shift remains calculated from paired absorption/emission predictions, not directly modeled.
 
 To combine user-facing reports:
 

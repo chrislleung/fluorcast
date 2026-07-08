@@ -18,15 +18,17 @@ Input:
   "user_id": "user-123",
   "molecule_smiles": "c1ccccc1",
   "solvent_smiles": "CCO",
-  "model_choice": "all",
+  "model_choice": "hybrid",
   "requested_at": "2026-06-22T12:00:00Z"
 }
 ```
 
-`model_choice` accepts `all`, `rf`, `extratrees`, `gbdt`, `histgb`, or
-`graph_model_later`. RF and ExtraTrees are the supported model artifacts.
-GBDT, HistGB, and the future graph model are experimental and are used only
-when their artifacts load successfully in the current environment.
+`model_choice` accepts `hybrid`, `all`, `rf`, `extratrees`, `gbdt`, `histgb`,
+or `graph_model_later`. `hybrid` runs the full FluorCast workflow and returns
+one combined absorption/emission/Stokes/QY prediction record. RF and
+ExtraTrees are the supported base-model artifacts. GBDT, HistGB, and
+the future graph model are experimental and are used only when their artifacts
+load successfully in the current environment.
 
 Successful output:
 
@@ -38,9 +40,27 @@ Successful output:
   "canonical_solvent_smiles": "CCO",
   "predictions": [
     {
-      "model_name": "rf",
+      "model_name": "hybrid",
+      "predicted_absorption_nm": 390.0,
       "predicted_emission_nm": 450.0,
+      "predicted_stokes_shift_nm": 60.0,
+      "predicted_stokes_shift_cm^-1": 3418.8,
       "predicted_quantum_yield": 0.2,
+      "brightness_class": "dim",
+      "physically_valid_stokes": true,
+      "prediction_intervals": {
+        "absorption_nm": {"lower": 380.0, "upper": 400.0},
+        "emission_nm": {"lower": 430.0, "upper": 470.0},
+        "quantum_yield": {"lower": 0.1, "upper": 0.3}
+      },
+      "applicability_domain": {
+        "outside_applicability_domain": false,
+        "targets": {
+          "absorption": {"outside_applicability_domain": false},
+          "emission": {"outside_applicability_domain": false},
+          "quantum_yield": {"outside_applicability_domain": false}
+        }
+      },
       "nearest_training_similarity": 0.8,
       "nearest_training_smiles": "c1ccccc1",
       "warnings": []
@@ -50,12 +70,11 @@ Successful output:
 }
 ```
 
-The runner adapts `scripts/predict_all_models.py`. It never invents values: if
-no requested model artifacts produce a prediction, the job fails with
-`PREDICTION_BACKEND_NOT_CONNECTED`. The portal prediction contract currently
-reports emission wavelength and quantum yield. If internal model code or
-historical datasets include absorption or lifetime values, the JSON runner
-does not include them in prediction output.
+The base-model runner adapts `scripts/predict_all_models.py`. The
+hybrid runner reuses `scripts/predict_full_fluorcast.py`, writes temporary
+workflow artifacts under `outputs/json_jobs/<job_id>/` unless `temp_dir` is
+provided, and never invents values. If no requested model artifacts produce a
+prediction, the job fails with `PREDICTION_BACKEND_NOT_CONNECTED`.
 
 For `model_choice: "all"`, each model artifact is checked independently. Models
 that cannot be loaded, including artifacts created by an incompatible

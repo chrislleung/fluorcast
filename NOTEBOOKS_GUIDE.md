@@ -48,7 +48,7 @@ Purpose: submit and monitor Slurm training jobs.
 
 Contents:
 
-- `!sbatch ../run_chemfluor.sh`
+- `!sbatch ../slurm/base_models/run_model_experiments_fluodb.sbatch`
 - `!squeue -u $USER`
 - List recent output logs
 - Tail a selected job log

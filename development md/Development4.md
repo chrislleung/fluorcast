@@ -108,17 +108,9 @@ CUDA device count: 1
 CUDA device name: NVIDIA H100 80GB HBM3
 ```
 
-The correct Nibi GPU request line used successfully was:
+The correct Nibi GPU request uses the `--gpus-per-node=h100:1` Slurm option.
 
-```bash
-#SBATCH --gpus-per-node=h100:1
-```
-
-Useful GPU partition:
-
-```bash
-#SBATCH --partition=gpubase_bygpu_b2
-```
+The useful GPU partition option is `--partition=gpubase_bygpu_b2`.
 
 The GPU graph GCN run completed 50 epochs in roughly 7 minutes. This was a major improvement over CPU, where graph training was too slow.
 

@@ -1,15 +1,12 @@
 #!/usr/bin/env bash
-#SBATCH --job-name=fluorcast-predict
+#SBATCH --job-name=paired-stokes
 #SBATCH --output=slurm-%x-%j.out
 #SBATCH --error=slurm-%x-%j.err
-#SBATCH --time=00:30:00
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=8G
+#SBATCH --time=24:00:00
+#SBATCH --cpus-per-task=12
+#SBATCH --mem=96G
 
 set -euo pipefail
-
-: "${FLUORCAST_INPUT_JSON:?FLUORCAST_INPUT_JSON must point to the input JSON}"
-: "${FLUORCAST_OUTPUT_JSON:?FLUORCAST_OUTPUT_JSON must point to the output JSON}"
 
 PROJECT_ROOT="${FLUORCAST_REPO:-${SLURM_SUBMIT_DIR:-}}"
 if [[ -z "$PROJECT_ROOT" || ! -d "$PROJECT_ROOT" ]]; then
@@ -19,10 +16,12 @@ if [[ -z "$PROJECT_ROOT" || ! -d "$PROJECT_ROOT" ]]; then
 fi
 
 cd "$PROJECT_ROOT"
+
 module purge
 module load python/3.11
 module load gcc
 module load rdkit
+
 if [[ -n "${FLUORCAST_ACTIVATE:-}" ]]; then
     if [[ ! -f "$FLUORCAST_ACTIVATE" ]]; then
         echo "Environment activation script does not exist: $FLUORCAST_ACTIVATE" >&2
@@ -40,6 +39,28 @@ else
     echo "No virtual environment found; using python from the loaded modules." >&2
 fi
 
-python scripts/run_prediction_job.py \
-    --input "$FLUORCAST_INPUT_JSON" \
-    --output "$FLUORCAST_OUTPUT_JSON"
+SPLIT_TYPE="${FLUORCAST_SPLIT_TYPE:-molecule}"
+SEED="${FLUORCAST_SEED:-0}"
+OUT_DIR="${FLUORCAST_OUT_DIR:-outputs/paired_spectral_three_way/${SPLIT_TYPE}/seed_${SEED}}"
+MODEL_OUT_DIR="${FLUORCAST_MODEL_OUT_DIR:-models/production_hybrid/paired_spectral/${SPLIT_TYPE}/seed_${SEED}}"
+N_JOBS="${SLURM_CPUS_PER_TASK:-1}"
+
+mkdir -p "$OUT_DIR" "$MODEL_OUT_DIR" outputs/slurm
+
+args=(
+    --split-type "$SPLIT_TYPE"
+    --seed "$SEED"
+    --models ${FLUORCAST_MODELS:-rf extratrees histgb gbdt mlp}
+    --out-dir "$OUT_DIR"
+    --model-out-dir "$MODEL_OUT_DIR"
+    --n-jobs "$N_JOBS"
+)
+
+if [[ -n "${FLUORCAST_PAIRED_DATASET:-}" ]]; then
+    args+=(--paired-dataset "$FLUORCAST_PAIRED_DATASET")
+fi
+if [[ -n "${FLUORCAST_MAX_ROWS:-}" ]]; then
+    args+=(--max-rows "$FLUORCAST_MAX_ROWS")
+fi
+
+python -u scripts/run_paired_spectral_three_way_experiment.py "${args[@]}"

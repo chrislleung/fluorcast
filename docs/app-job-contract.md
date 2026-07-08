@@ -17,7 +17,7 @@ The input is one JSON object with these required, non-empty string fields:
 | `model_choice` | Requested prediction model or supported model collection. |
 | `requested_at` | ISO 8601 timestamp for job creation. |
 
-The currently recognized `model_choice` values are `all`, `rf`, `extratrees`, `gbdt`, `histgb`, and `graph_model_later`. Recognition does not guarantee that an artifact is installed on a particular NIBI deployment.
+The currently recognized `model_choice` values are `hybrid`, `all`, `rf`, `extratrees`, `gbdt`, `histgb`, and `graph_model_later`. Recognition does not guarantee that an artifact is installed on a particular NIBI deployment. `hybrid` is the preferred full FluorCast workflow.
 
 ```json
 {
@@ -25,7 +25,7 @@ The currently recognized `model_choice` values are `all`, `rf`, `extratrees`, `g
   "user_id": "user-example-001",
   "molecule_smiles": "c1ccccc1",
   "solvent_smiles": "CCO",
-  "model_choice": "all",
+  "model_choice": "hybrid",
   "requested_at": "2026-07-03T14:30:00Z"
 }
 ```
@@ -46,7 +46,7 @@ Every completed job attempt writes one JSON object. The following fields are req
 
 `error` is optional. It is absent for success and required by this contract when `status` is `failed`. It contains stable `code` and human-readable `message` strings. Applications should branch on `code`, not parse `message`. Tracebacks and internal filesystem details are operational diagnostics and are not part of this app-facing contract.
 
-Prediction records are model results, not a promise that every target is available. The current engine may provide `model_name`, `predicted_emission_nm`, `predicted_quantum_yield`, `nearest_training_similarity`, `nearest_training_smiles`, and per-model `warnings`. Missing target values may be `null`. This contract does not define additional chemical outputs.
+Prediction records are model results, not a promise that every target is available. The hybrid engine may provide `model_name`, `predicted_absorption_nm`, `predicted_emission_nm`, `predicted_stokes_shift_nm`, `predicted_stokes_shift_cm^-1`, `predicted_quantum_yield`, `brightness_class`, `physically_valid_stokes`, `prediction_intervals`, `applicability_domain`, `nearest_training_similarity`, `nearest_training_smiles`, and per-model `warnings`. Legacy model choices may only provide emission, quantum yield, nearest-training fields, and warnings. Missing target values may be `null`.
 
 When available, `applicability_domain` may contain `outside_applicability_domain`, `nearest_training_similarity`, `nearest_training_smiles`, and `confidence_label`. A successful result outside the domain remains `status: "success"` and must also carry a warning; it is not silently converted into a failure.
 
@@ -60,9 +60,27 @@ When available, `applicability_domain` may contain `outside_applicability_domain
   "canonical_solvent_smiles": "CCO",
   "predictions": [
     {
-      "model_name": "rf",
+      "model_name": "hybrid",
+      "predicted_absorption_nm": 390.0,
       "predicted_emission_nm": 450.0,
+      "predicted_stokes_shift_nm": 60.0,
+      "predicted_stokes_shift_cm^-1": 3418.8,
       "predicted_quantum_yield": 0.2,
+      "brightness_class": "dim",
+      "physically_valid_stokes": true,
+      "prediction_intervals": {
+        "absorption_nm": {"lower": 380.0, "upper": 400.0},
+        "emission_nm": {"lower": 430.0, "upper": 470.0},
+        "quantum_yield": {"lower": 0.1, "upper": 0.3}
+      },
+      "applicability_domain": {
+        "outside_applicability_domain": false,
+        "targets": {
+          "absorption": {"outside_applicability_domain": false},
+          "emission": {"outside_applicability_domain": false},
+          "quantum_yield": {"outside_applicability_domain": false}
+        }
+      },
       "nearest_training_similarity": 0.8,
       "nearest_training_smiles": "c1ccccc1",
       "warnings": []

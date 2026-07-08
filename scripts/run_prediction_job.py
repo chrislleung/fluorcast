@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 import traceback as traceback_module
 from pathlib import Path
@@ -19,6 +20,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import predict_all_models  # noqa: E402
+import predict_full_fluorcast  # noqa: E402
 
 
 REQUIRED_FIELDS = (
@@ -36,6 +38,7 @@ MODEL_CHOICES = {
     "gbdt",
     "histgb",
     "graph_model_later",
+    "hybrid",
 }
 MODEL_AVAILABILITY = {
     "rf": {"artifact_dir": "rf", "experimental": False},
@@ -44,6 +47,9 @@ MODEL_AVAILABILITY = {
     "histgb": {"artifact_dir": "histgb", "experimental": True},
     "graph_model_later": {"artifact_dir": None, "experimental": True},
 }
+DEFAULT_ABS_HYBRID_DIR = PROJECT_ROOT / "models" / "production_hybrid" / "absorption_nm"
+DEFAULT_EM_HYBRID_DIR = PROJECT_ROOT / "models" / "production_hybrid" / "emission_nm"
+DEFAULT_QY_HYBRID_DIR = PROJECT_ROOT / "models" / "production_hybrid" / "quantum_yield"
 PredictionBackend = Callable[
     [dict[str, Any]], tuple[list[dict[str, Any]], list[str], str, str]
 ]
@@ -129,11 +135,124 @@ def _unavailable_message(model_name: str) -> str:
     )
 
 
+def _path_from_env(name: str, default: Path) -> Path:
+    return Path(os.environ.get(name, str(default)))
+
+
+def _json_job_out_dir(payload: dict[str, Any]) -> Path:
+    if payload.get("temp_dir"):
+        return Path(str(payload["temp_dir"]))
+    root = Path(
+        os.environ.get("FLUORCAST_JSON_JOB_TEMP_DIR", PROJECT_ROOT / "outputs" / "json_jobs")
+    )
+    return root / str(payload["job_id"])
+
+
+def _intervals_from_full_report(full: dict[str, Any]) -> dict[str, Any]:
+    intervals: dict[str, Any] = {}
+    for target, report_prefix in (
+        ("absorption_nm", "absorption"),
+        ("emission_nm", "emission"),
+        ("quantum_yield", "quantum_yield"),
+    ):
+        value = full.get(f"{report_prefix}_uncertainty_interval")
+        if value is not None:
+            intervals[target] = value
+    return intervals
+
+
+def _applicability_domain_from_full_report(full: dict[str, Any]) -> dict[str, Any]:
+    targets = {
+        target: {
+            "outside_applicability_domain": bool(
+                full.get(f"{target}_outside_applicability_domain", False)
+            )
+        }
+        for target in ("absorption", "emission", "quantum_yield")
+        if f"{target}_outside_applicability_domain" in full
+    }
+    return {
+        "outside_applicability_domain": bool(
+            full.get("outside_applicability_domain", False)
+        ),
+        "targets": targets,
+    }
+
+
+def _nearest_training_from_base_predictions(out_dir: Path) -> tuple[float | None, str | None]:
+    base_path = out_dir / "base_predictions.csv"
+    if not base_path.exists():
+        return None, None
+    table = pd.read_csv(base_path)
+    similarity = None
+    smiles = None
+    if "nearest_training_similarity" in table:
+        values = pd.to_numeric(table["nearest_training_similarity"], errors="coerce").dropna()
+        if not values.empty:
+            similarity = float(values.max())
+    if "nearest_training_smiles" in table:
+        nonempty = table["nearest_training_smiles"].dropna().astype(str)
+        if not nonempty.empty:
+            smiles = str(nonempty.iloc[0])
+    return similarity, smiles
+
+
+def _hybrid_prediction_backend(
+    payload: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[str], str, str]:
+    out_dir = _json_job_out_dir(payload)
+    args = SimpleNamespace(
+        smiles=payload["molecule_smiles"],
+        solvent_smiles=payload["solvent_smiles"],
+        out_dir=out_dir,
+        tree_model_dir=PROJECT_ROOT / predict_all_models.DEFAULT_TREE_MODEL_DIR,
+        neural_model_dir=PROJECT_ROOT / predict_all_models.DEFAULT_NEURAL_MODEL_DIR,
+        graph_model_dirs=[],
+        absorption_hybrid_model_dir=_path_from_env(
+            "FLUORCAST_ABS_HYBRID_DIR", DEFAULT_ABS_HYBRID_DIR
+        ),
+        emission_hybrid_model_dir=_path_from_env(
+            "FLUORCAST_EM_HYBRID_DIR", DEFAULT_EM_HYBRID_DIR
+        ),
+        quantum_yield_hybrid_model_dir=_path_from_env(
+            "FLUORCAST_QY_HYBRID_DIR", DEFAULT_QY_HYBRID_DIR
+        ),
+        skip_hybrid=False,
+        known_absorption_nm=None,
+        known_emission_nm=None,
+        known_quantum_yield=None,
+    )
+    full = predict_full_fluorcast.run_workflow(args)
+    nearest_similarity, nearest_smiles = _nearest_training_from_base_predictions(out_dir)
+    warnings = list(full.get("warnings") or [])
+    record = {
+        "model_name": "hybrid",
+        "predicted_absorption_nm": _nullable_number(full.get("predicted_absorption_nm")),
+        "predicted_emission_nm": _nullable_number(full.get("predicted_emission_nm")),
+        "predicted_stokes_shift_nm": _nullable_number(full.get("stokes_shift_nm")),
+        "predicted_stokes_shift_cm^-1": _nullable_number(full.get("stokes_shift_cm^-1")),
+        "physically_valid_stokes": bool(full.get("physically_valid_stokes")),
+        "prediction_intervals": _intervals_from_full_report(full),
+        "applicability_domain": _applicability_domain_from_full_report(full),
+        "nearest_training_similarity": nearest_similarity,
+        "nearest_training_smiles": nearest_smiles,
+        "warnings": warnings,
+    }
+    if "predicted_quantum_yield" in full:
+        record["predicted_quantum_yield"] = _nullable_number(
+            full.get("predicted_quantum_yield")
+        )
+        record["brightness_class"] = full.get("brightness_class")
+    return [record], warnings, payload["molecule_smiles"], payload["solvent_smiles"]
+
+
 def fluorcast_prediction_backend(
     payload: dict[str, Any],
 ) -> tuple[list[dict[str, Any]], list[str], str, str]:
     """Adapt available FluorCast model artifacts to the JSON job contract."""
     choice = str(payload["model_choice"])
+    if choice == "hybrid":
+        return _hybrid_prediction_backend(payload)
     requested_models = (
         ["rf", "extratrees", "gbdt", "histgb", "graph_model_later"]
         if choice == "all"
