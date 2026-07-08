@@ -42,3 +42,13 @@ def test_docs_do_not_point_to_root_run_sh_scripts() -> None:
         if "test_nibi_gpu.sh" in text:
             offenders.append(path)
     assert offenders == []
+
+
+def test_docs_do_not_use_old_project_folder_names() -> None:
+    old_project_folders = ("ChemFluor_Project", "ChemFluor_Project_synced")
+    offenders = []
+    for path in _docs():
+        text = path.read_text(encoding="utf-8", errors="ignore")
+        if any(folder in text for folder in old_project_folders):
+            offenders.append(path)
+    assert offenders == []

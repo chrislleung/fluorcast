@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=paired-stokes
-#SBATCH --output=slurm-%x-%j.out
-#SBATCH --error=slurm-%x-%j.err
+#SBATCH --output=outputs/slurm/%x-%j.out
+#SBATCH --error=outputs/slurm/%x-%j.err
 #SBATCH --time=24:00:00
 #SBATCH --cpus-per-task=12
 #SBATCH --mem=96G
 
 set -euo pipefail
 
-PROJECT_ROOT="${FLUORCAST_REPO:-${SLURM_SUBMIT_DIR:-}}"
+PROJECT_ROOT="${FLUORCAST_REPO:-${SLURM_SUBMIT_DIR:-$HOME/scratch/FluorCast}}"
 if [[ -z "$PROJECT_ROOT" || ! -d "$PROJECT_ROOT" ]]; then
     echo "Could not locate the FluorCast repository." >&2
     echo "Submit from the project root or set FLUORCAST_REPO." >&2
@@ -17,7 +17,7 @@ fi
 
 cd "$PROJECT_ROOT"
 
-module purge
+module purge || true
 module load python/3.11
 module load gcc
 module load rdkit
@@ -32,6 +32,9 @@ if [[ -n "${FLUORCAST_ACTIVATE:-}" ]]; then
 elif [[ -f "$HOME/scratch/chemfluor_env/bin/activate" ]]; then
     # shellcheck disable=SC1091
     source "$HOME/scratch/chemfluor_env/bin/activate"
+elif [[ -f "$HOME/scratch/fluorcast_env/bin/activate" ]]; then
+    # shellcheck disable=SC1091
+    source "$HOME/scratch/fluorcast_env/bin/activate"
 elif [[ -f .venv/bin/activate ]]; then
     # shellcheck disable=SC1091
     source .venv/bin/activate
@@ -41,8 +44,8 @@ fi
 
 SPLIT_TYPE="${FLUORCAST_SPLIT_TYPE:-molecule}"
 SEED="${FLUORCAST_SEED:-0}"
-OUT_DIR="${FLUORCAST_OUT_DIR:-outputs/paired_spectral_three_way/${SPLIT_TYPE}/seed_${SEED}}"
-MODEL_OUT_DIR="${FLUORCAST_MODEL_OUT_DIR:-models/production_hybrid/paired_spectral/${SPLIT_TYPE}/seed_${SEED}}"
+OUT_DIR="${FLUORCAST_OUT_DIR:-outputs/paired_stokes_three_way/${SPLIT_TYPE}/seed_${SEED}}"
+MODEL_OUT_DIR="${FLUORCAST_MODEL_OUT_DIR:-models/paired_stokes_three_way/${SPLIT_TYPE}/seed_${SEED}}"
 N_JOBS="${SLURM_CPUS_PER_TASK:-1}"
 
 mkdir -p "$OUT_DIR" "$MODEL_OUT_DIR" outputs/slurm

@@ -1,16 +1,17 @@
 #!/bin/bash
+# Archived workflow; retained for reproducibility, not routine use.
 #SBATCH --job-name=hyb_qy_scaf
 #SBATCH --time=08:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=64G
-#SBATCH --output=logs/%x-%j.out
-#SBATCH --error=logs/%x-%j.err
+#SBATCH --output=outputs/slurm/%x-%j.out
+#SBATCH --error=outputs/slurm/%x-%j.err
 
 set -euo pipefail
 
-cd /scratch/chrisl/ChemFluor_Project
+cd /scratch/chrisl/FluorCast
 
-PYTHON=/scratch/chrisl/ChemFluor_Project/.venv/bin/python
+PYTHON=/scratch/chrisl/FluorCast/.venv/bin/python
 
 echo "PWD: $(pwd)"
 echo "HOST: $(hostname)"

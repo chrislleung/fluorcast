@@ -196,6 +196,7 @@ git pull origin main
 Most prediction users should run the full hybrid prediction workflow:
 
 ```bash
+mkdir -p outputs/slurm
 sbatch slurm/run_predict_full_fluorcast.sbatch
 ```
 
@@ -206,12 +207,15 @@ The Slurm folders are organized by purpose:
 
 ```text
 slurm/              Current recommended workflows and app-facing jobs
-slurm/base_models/  Original RF, ExtraTrees, MLP, and graph-only workflows
-slurm/legacy/       Archived older workflows kept for reproducibility
+slurm/base_models/  Supported original RF, ExtraTrees, MLP, and graph workflows
+slurm/manuscript/   Manuscript/history workflows
+slurm/util/         Utility/test jobs
+slurm/legacy/       Archived old workflows not recommended for routine use
 ```
 
-Production hybrid artifacts live on Nibi under `models/production_hybrid/` and
-should not be committed.
+`models/production_hybrid/` is reserved for explicit production artifacts and
+should not be committed. Generic experiment wrappers default to split- and
+seed-specific paths outside that directory.
 
 ## Run Full Experiments on Nibi
 
@@ -225,13 +229,14 @@ need to create or paste them manually.
 
 ### 1. Base Tree Model Experiments
 
-This trains RF, ExtraTrees, HistGB, and GBDT on emission and quantum yield.
-This original base-model wrapper currently reproduces the emission/QY baseline
-experiments. Absorption and paired spectral/Stokes workflows are handled by the
-hybrid and paired spectral scripts below.
+This trains RF, ExtraTrees, HistGB, and GBDT on absorption, emission, and
+quantum yield. A production full report requires absorption-capable base
+artifacts; `models/experiments_fluodb/` should therefore contain artifacts for
+`absorption_nm`, `emission_nm`, and `quantum_yield`.
 
 ```bash
 cd ~/scratch/FluorCast
+mkdir -p outputs/slurm
 sbatch slurm/base_models/run_model_experiments_fluodb.sbatch
 ```
 
@@ -257,6 +262,7 @@ This trains MLP baselines and compares them with the tree-model results.
 
 ```bash
 cd ~/scratch/FluorCast
+mkdir -p outputs/slurm
 sbatch slurm/base_models/run_neural_experiments.sbatch
 ```
 
@@ -278,7 +284,8 @@ outputs/neural_model_experiments_fluodb/
 
 ### 3. GPU Graph-Only Experiments
 
-Graph models should be run on GPU.
+Graph models should be run on GPU. These remain emission/QY comparison
+workflows unless absorption graph training is implemented and tested later.
 
 Main graph experiment scripts already included in the repo:
 
@@ -294,6 +301,7 @@ Recommended emission stability runs:
 
 ```bash
 cd ~/scratch/FluorCast
+mkdir -p outputs/slurm
 sbatch slurm/base_models/run_graph_gin_emission_3seeds_gpu.sbatch
 sbatch slurm/base_models/run_graph_gcn_emission_3seeds_gpu.sbatch
 ```
@@ -335,6 +343,7 @@ and split at a time.
 
 ```bash
 cd ~/scratch/FluorCast
+mkdir -p outputs/slurm
 
 export FLUORCAST_TARGET_NAME="absorption_nm"
 export FLUORCAST_SPLIT_TYPE="molecule"
@@ -427,11 +436,35 @@ cd ~/scratch/FluorCast
 export FLUORCAST_SMILES="YOUR_CHROMOPHORE_SMILES"
 export FLUORCAST_SOLVENT_SMILES="YOUR_SOLVENT_SMILES"
 export FLUORCAST_OUT_DIR="outputs/predictions/example_full"
+export FLUORCAST_TREE_MODEL_DIR="models/experiments_fluodb"
+export FLUORCAST_NEURAL_MODEL_DIR="models/neural_experiments_fluodb"
+export FLUORCAST_ABS_HYBRID_DIR="models/production_hybrid/absorption_nm"
+export FLUORCAST_EM_HYBRID_DIR="models/production_hybrid/emission_nm"
+export FLUORCAST_QY_HYBRID_DIR="models/production_hybrid/quantum_yield"
+
+mkdir -p outputs/slurm
 
 sbatch slurm/run_predict_full_fluorcast.sbatch
 ```
 
-Production hybrid model artifacts are expected on Nibi under:
+The wrapper uses `models/experiments_fluodb` for tree models and
+`models/neural_experiments_fluodb` for neural models. Override them with
+`FLUORCAST_TREE_MODEL_DIR` and `FLUORCAST_NEURAL_MODEL_DIR`. Set
+`FLUORCAST_SKIP_HYBRID=1` to produce a base-model-only report. Production full
+reports require the selected base-model directories to include absorption
+artifacts.
+
+For a base-only smoke test against an older absorption-capable tree directory:
+
+```bash
+export FLUORCAST_TREE_MODEL_DIR="models/chemfluor_combined_fluodb"
+export FLUORCAST_NEURAL_MODEL_DIR="models/does_not_exist"
+export FLUORCAST_SKIP_HYBRID="1"
+mkdir -p outputs/slurm
+sbatch slurm/run_predict_full_fluorcast.sbatch
+```
+
+Only explicitly trained production hybrid artifacts belong under:
 
 ```text
 models/production_hybrid/absorption_nm/
@@ -450,6 +483,7 @@ For the prepared benchmark/presentation prediction, use the included Slurm scrip
 
 ```bash
 cd ~/scratch/FluorCast
+mkdir -p outputs/slurm
 sbatch slurm/base_models/run_predict_all_models.sbatch
 ```
 

@@ -1,11 +1,12 @@
 #!/bin/bash
+# Archived workflow; retained for reproducibility, not routine use.
 #SBATCH --job-name=chemfluor
 #SBATCH --account=def-yzhao
 #SBATCH --time=06:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --output=outputs/chemfluor_%j.out
-#SBATCH --error=outputs/chemfluor_%j.err
+#SBATCH --output=outputs/slurm/chemfluor_%j.out
+#SBATCH --error=outputs/slurm/chemfluor_%j.err
 
 set -euo pipefail
 

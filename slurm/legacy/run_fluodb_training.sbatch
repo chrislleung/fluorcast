@@ -1,14 +1,15 @@
 #!/bin/bash
+# Archived workflow; retained for reproducibility, not routine use.
 #SBATCH --job-name=chemfluor_fluodb
 #SBATCH --time=08:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
-#SBATCH --output=outputs/fluodb_train_%j.out
-#SBATCH --error=outputs/fluodb_train_%j.err
+#SBATCH --output=outputs/slurm/fluodb_train_%j.out
+#SBATCH --error=outputs/slurm/fluodb_train_%j.err
 
 set -euo pipefail
 
-cd ~/scratch/ChemFluor_Project_git
+cd ~/scratch/FluorCast
 
 module purge
 module load python/3.11

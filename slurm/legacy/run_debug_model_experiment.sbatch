@@ -1,14 +1,15 @@
 #!/bin/bash
+# Archived workflow; retained for reproducibility, not routine use.
 #SBATCH --job-name=debug_models
 #SBATCH --time=02:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
-#SBATCH --output=outputs/debug_models_%j.out
-#SBATCH --error=outputs/debug_models_%j.err
+#SBATCH --output=outputs/slurm/debug_models_%j.out
+#SBATCH --error=outputs/slurm/debug_models_%j.err
 
 set -euo pipefail
 
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 
 module purge
 module load python/3.11

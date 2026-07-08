@@ -43,9 +43,14 @@ On Nibi, submit the reusable Slurm wrapper from the repository root:
 export FLUORCAST_SPLIT_TYPE="scaffold"
 export FLUORCAST_SEED="0"
 export FLUORCAST_OUT_DIR="outputs/paired_stokes_three_way/scaffold"
-export FLUORCAST_MODEL_OUT_DIR="models/production_hybrid/paired_spectral/scaffold"
+export FLUORCAST_MODEL_OUT_DIR="models/paired_stokes_three_way/scaffold/seed_0"
 sbatch slurm/run_paired_spectral_three_way_experiment.sbatch
 ```
+
+Direct Stokes-target wrappers are historical. The recommended workflow is
+paired absorption/emission prediction followed by calculation of Stokes shift.
+The reusable wrapper defaults to split- and seed-specific paths under
+`outputs/paired_stokes_three_way/` and `models/paired_stokes_three_way/`.
 
 ## Outputs
 

@@ -1,13 +1,14 @@
 #!/bin/bash
+# Archived workflow; retained for reproducibility, not routine use.
 #SBATCH --time=12:00:00
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=96G
-#SBATCH --output=logs/%x-%j.out
-#SBATCH --error=logs/%x-%j.err
+#SBATCH --output=outputs/slurm/%x-%j.out
+#SBATCH --error=outputs/slurm/%x-%j.err
 
 set -euo pipefail
 
-cd /scratch/chrisl/ChemFluor_Project
+cd /scratch/chrisl/FluorCast
 
 echo "PWD: $(pwd)"
 echo "HOST: $(hostname)"
@@ -21,7 +22,7 @@ module load rdkit
 
 module list
 
-PYTHON=/scratch/chrisl/ChemFluor_Project/.venv/bin/python
+PYTHON=/scratch/chrisl/FluorCast/.venv/bin/python
 
 echo "Python: $PYTHON"
 $PYTHON --version

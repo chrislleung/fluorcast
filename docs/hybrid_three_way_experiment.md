@@ -12,14 +12,14 @@ python scripts/run_hybrid_three_way_experiment.py `
   --model-out-dir models/hybrid_three_way_smoke/molecule/emission_nm
 ```
 
-Full experiment:
+Full non-production experiment:
 
 ```powershell
 python scripts/run_hybrid_three_way_experiment.py `
   --target-name absorption_nm --split-type scaffold --seed 0 `
   --models rf extratrees histgb gbdt mlp `
   --out-dir outputs/hybrid_three_way/scaffold/absorption_nm `
-  --model-out-dir models/production_hybrid/absorption_nm
+  --model-out-dir models/hybrid_three_way/scaffold/absorption_nm/seed_0
 ```
 
 Use `--standardized-combined data/processed/fluodb_lite/combined_deduplicated.csv` to select an existing standardized dataset explicitly, and `--solvent-descriptors` to override the default descriptor table.
@@ -31,12 +31,18 @@ export FLUORCAST_TARGET_NAME="absorption_nm"
 export FLUORCAST_SPLIT_TYPE="scaffold"
 export FLUORCAST_SEED="0"
 export FLUORCAST_OUT_DIR="outputs/hybrid_three_way/scaffold/absorption_nm"
-export FLUORCAST_MODEL_OUT_DIR="models/production_hybrid/absorption_nm"
+export FLUORCAST_MODEL_OUT_DIR="models/hybrid_three_way/scaffold/absorption_nm/seed_0"
 sbatch slurm/run_hybrid_three_way_experiment.sbatch
 ```
 
-Repeat with `FLUORCAST_TARGET_NAME=emission_nm` and
-`FLUORCAST_TARGET_NAME=quantum_yield` to build the full production layout:
+The wrapper defaults to
+`outputs/hybrid_three_way/<split>/<target>/seed_<seed>` and
+`models/hybrid_three_way/<split>/<target>/seed_<seed>`. Use
+`FLUORCAST_TARGET_NAME`, `FLUORCAST_SPLIT_TYPE`, `FLUORCAST_OUT_DIR`, and
+`FLUORCAST_MODEL_OUT_DIR` to override those values. Set the model output to a
+production path only for an explicit production training run.
+
+Explicit production runs may build this complete layout:
 
 ```text
 models/production_hybrid/absorption_nm/
