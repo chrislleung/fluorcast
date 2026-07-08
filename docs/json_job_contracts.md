@@ -1,4 +1,4 @@
-# FluorCast JSON job contracts
+﻿# FluorCast JSON job contracts
 
 These command-line entrypoints run one portal job from an input JSON file and
 always attempt to write an output JSON file. They do not make network calls or
@@ -164,3 +164,4 @@ The future portal can write an input JSON file, submit a Slurm job that invokes
 one of these commands on NIBI, and read the resulting JSON file after the job
 finishes. Slurm submission, status polling, file transfer, authentication, and
 portal persistence all happen outside these scripts.
+

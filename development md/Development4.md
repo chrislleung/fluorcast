@@ -1,4 +1,4 @@
-# ChemFluor Development Notes — GPU Graph Neural Networks + Seed Stability
+﻿# ChemFluor Development Notes â€” GPU Graph Neural Networks + Seed Stability
 
 ## Current Project State
 
@@ -19,7 +19,7 @@ data/solvent_descriptors_expanded_deep4chem.csv
 The current Nibi project folder is:
 
 ```bash
-~/scratch/ChemFluor_Project
+~/scratch/FluorCast
 ```
 
 The Nibi virtual environment is:
@@ -31,7 +31,7 @@ The Nibi virtual environment is:
 Standard Nibi environment setup:
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 
 module purge
 module load python/3.11
@@ -75,7 +75,7 @@ For the graph models, SMILES are not being used only as fingerprint vectors.
 The graph workflow is:
 
 ```text
-SMILES string → RDKit molecule → molecular graph → graph neural network
+SMILES string â†’ RDKit molecule â†’ molecular graph â†’ graph neural network
 ```
 
 The molecular graph representation is:
@@ -91,7 +91,7 @@ The graph model learns a molecular embedding from atom-bond structure. That lear
 Current graph model input structure:
 
 ```text
-chromophore molecular graph + solvent descriptor vector → prediction head
+chromophore molecular graph + solvent descriptor vector â†’ prediction head
 ```
 
 The solvent is still represented as numeric descriptors, not as a separate solvent graph.
@@ -120,7 +120,7 @@ The strongest non-graph models from the expanded ChemFluor + Deep4Chem + FluoDB-
 
 ### Emission Wavelength
 
-| Model | Emission MAE | RMSE | R² |
+| Model | Emission MAE | RMSE | RÂ² |
 | --- | ---: | ---: | ---: |
 | RF | 23.8493 nm | 37.8891 | 0.8375 |
 | ExtraTrees | 28.2001 nm | 48.2149 | 0.7369 |
@@ -136,7 +136,7 @@ RF remains the strongest global emission model.
 
 ### Quantum Yield
 
-| Model | QY MAE | RMSE | R² |
+| Model | QY MAE | RMSE | RÂ² |
 | --- | ---: | ---: | ---: |
 | ExtraTrees | 0.1464 | 0.2203 | 0.5052 |
 | RF | 0.1505 | 0.2113 | 0.5448 |
@@ -147,20 +147,20 @@ RF remains the strongest global emission model.
 Main conclusion:
 
 ```text
-ExtraTrees has the lowest QY MAE, while RF has the best QY R² among the tree models.
+ExtraTrees has the lowest QY MAE, while RF has the best QY RÂ² among the tree models.
 ```
 
 ## GPU Graph GCN First Result
 
 A GPU-trained graph GCN on `emission_nm` gave:
 
-| Model | Target | MAE | RMSE | R² | Train Rows | Test Rows |
+| Model | Target | MAE | RMSE | RÂ² | Train Rows | Test Rows |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | graph_gcn | emission_nm | 31.0313 nm | 43.0088 | 0.7906 | 29061 | 8166 |
 
 This improved heavily over the CPU GCN:
 
-| Run | MAE | RMSE | R² |
+| Run | MAE | RMSE | RÂ² |
 | --- | ---: | ---: | ---: |
 | CPU GCN | 46.7820 nm | 62.5497 | 0.5572 |
 | GPU GCN | 31.0313 nm | 43.0088 | 0.7906 |
@@ -177,7 +177,7 @@ The GPU GCN did not beat RF globally, but it became competitive with the MLP mod
 
 A follow-up GPU job trained `graph_gin` and `graph_mpnn` on emission.
 
-| Model | Target | MAE | RMSE | R² | Train Rows | Test Rows |
+| Model | Target | MAE | RMSE | RÂ² | Train Rows | Test Rows |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | graph_gin | emission_nm | 28.9787 nm | 39.8780 | 0.8200 | 29061 | 8166 |
 | graph_mpnn | emission_nm | 62.0897 nm | 82.8804 | 0.2225 | 29061 | 8166 |
@@ -301,7 +301,7 @@ Three-seed runs were completed for graph GIN and graph GCN emission.
 
 ### Graph GIN Emission Seeds
 
-| Seed | MAE | RMSE | R² | Benchmark Prediction | Benchmark Error |
+| Seed | MAE | RMSE | RÂ² | Benchmark Prediction | Benchmark Error |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 0 | 30.2299 nm | 41.1515 | 0.8061 | 591.7267 nm | 52.7267 nm |
 | 1 | 29.7446 nm | 40.7704 | 0.8150 | 557.0889 nm | 18.0889 nm |
@@ -309,7 +309,7 @@ Three-seed runs were completed for graph GIN and graph GCN emission.
 
 Grouped summary:
 
-| Model | Target | Seeds | Mean MAE | MAE Std | Min MAE | Max MAE | Mean R² | Min R² | Max R² |
+| Model | Target | Seeds | Mean MAE | MAE Std | Min MAE | Max MAE | Mean RÂ² | Min RÂ² | Max RÂ² |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | graph_gin | emission_nm | 3 | 29.4861 nm | 0.9013 | 28.4839 | 30.2299 | 0.8108 | 0.8061 | 0.8150 |
 
@@ -323,7 +323,7 @@ However, the difficult benchmark prediction changes substantially across seeds.
 
 ### Graph GCN Emission Seeds
 
-| Seed | MAE | RMSE | R² | Benchmark Prediction | Benchmark Error |
+| Seed | MAE | RMSE | RÂ² | Benchmark Prediction | Benchmark Error |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 0 | 32.6955 nm | 44.1589 | 0.7768 | 564.3601 nm | 25.3601 nm |
 | 1 | 28.0696 nm | 39.7366 | 0.8242 | 564.3798 nm | 25.3798 nm |
@@ -331,7 +331,7 @@ However, the difficult benchmark prediction changes substantially across seeds.
 
 Grouped summary:
 
-| Model | Target | Seeds | Mean MAE | MAE Std | Min MAE | Max MAE | Mean R² | Min R² | Max R² |
+| Model | Target | Seeds | Mean MAE | MAE Std | Min MAE | Max MAE | Mean RÂ² | Min RÂ² | Max RÂ² |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | graph_gcn | emission_nm | 3 | 29.7342 nm | 2.5711 | 28.0696 | 32.6955 | 0.8017 | 0.7768 | 0.8242 |
 
@@ -345,14 +345,14 @@ Graph GCN can reach excellent emission performance, but it is less stable than G
 
 Graph GIN and graph GCN were also trained on `quantum_yield` using seed 0.
 
-| Model | Target | Seed | MAE | RMSE | R² | Train Rows | Test Rows |
+| Model | Target | Seed | MAE | RMSE | RÂ² | Train Rows | Test Rows |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | graph_gcn | quantum_yield | 0 | 0.1610 | 0.2271 | 0.4792 | 21783 | 6284 |
 | graph_gin | quantum_yield | 0 | 0.1681 | 0.2393 | 0.4219 | 21783 | 6284 |
 
 Compared to non-graph QY baselines:
 
-| Model | QY MAE | R² |
+| Model | QY MAE | RÂ² |
 | --- | ---: | ---: |
 | ExtraTrees | 0.1464 | 0.5052 |
 | RF | 0.1505 | 0.5448 |
@@ -378,7 +378,7 @@ GCN is better than GIN for QY, but both are worse than ExtraTrees, RF, and the b
 | Best UV/blue emission model | graph_gin appears promising |
 | Best red/NIR emission model | RF |
 | Best QY MAE | ExtraTrees |
-| Best QY R² | RF |
+| Best QY RÂ² | RF |
 | Best graph QY | graph_gcn, but not competitive |
 | Avoid for now | current graph_mpnn implementation |
 
@@ -387,7 +387,7 @@ GCN is better than GIN for QY, but both are worse than ExtraTrees, RF, and the b
 Use this wording in reports or presentations:
 
 ```text
-Graph neural networks were tested by converting SMILES into molecular graphs and training GCN, GIN, and MPNN architectures with solvent descriptors appended to the learned molecular embedding. GPU training on Nibi H100 made graph experiments practical and substantially improved performance over CPU training. For emission wavelength, graph GIN was the most stable graph architecture across three seeds, achieving 29.49 ± 0.90 nm MAE and mean R² of 0.811. Graph GCN reached a slightly better best-case MAE of 28.07 nm but had higher seed variability, with 29.73 ± 2.57 nm MAE. RF remained the best global emission model at 23.85 nm MAE, but graph GIN was competitive with HistGB and ExtraTrees and performed especially well in UV/blue regions. For quantum yield, graph models did not outperform existing RF, ExtraTrees, or MLP baselines.
+Graph neural networks were tested by converting SMILES into molecular graphs and training GCN, GIN, and MPNN architectures with solvent descriptors appended to the learned molecular embedding. GPU training on Nibi H100 made graph experiments practical and substantially improved performance over CPU training. For emission wavelength, graph GIN was the most stable graph architecture across three seeds, achieving 29.49 Â± 0.90 nm MAE and mean RÂ² of 0.811. Graph GCN reached a slightly better best-case MAE of 28.07 nm but had higher seed variability, with 29.73 Â± 2.57 nm MAE. RF remained the best global emission model at 23.85 nm MAE, but graph GIN was competitive with HistGB and ExtraTrees and performed especially well in UV/blue regions. For quantum yield, graph models did not outperform existing RF, ExtraTrees, or MLP baselines.
 ```
 
 Shorter version:
@@ -481,7 +481,7 @@ family
 target
 MAE
 RMSE
-R²
+RÂ²
 seed mean/std if applicable
 best use case
 ```
@@ -515,7 +515,7 @@ The current MPNN result is too weak:
 
 ```text
 graph_mpnn emission MAE = 62.0897 nm
-R² = 0.2225
+RÂ² = 0.2225
 ```
 
 Do not rerun MPNN unless debugging the implementation itself.
@@ -591,12 +591,12 @@ cat outputs/graph_gcn_qy_gpu/graph_model_comparison.md
 Use this context in a new chat:
 
 ```text
-We have completed GPU graph neural network experiments for ChemFluor. SMILES are now converted into molecular graphs for graph_gcn, graph_gin, and graph_mpnn. GPU training works on Nibi H100. Graph GIN is the best stable graph emission model, with 29.49 ± 0.90 nm MAE across three seeds. Graph GCN reached a best seed of 28.07 nm MAE but is less stable, with 29.73 ± 2.57 nm mean MAE. RF is still best globally for emission at 23.85 nm MAE. Graph models do not beat RF/ExtraTrees/MLP for quantum yield. The next task is to make a final combined comparison table/figure and prepare presentation-ready conclusions.
+We have completed GPU graph neural network experiments for ChemFluor. SMILES are now converted into molecular graphs for graph_gcn, graph_gin, and graph_mpnn. GPU training works on Nibi H100. Graph GIN is the best stable graph emission model, with 29.49 Â± 0.90 nm MAE across three seeds. Graph GCN reached a best seed of 28.07 nm MAE but is less stable, with 29.73 Â± 2.57 nm mean MAE. RF is still best globally for emission at 23.85 nm MAE. Graph models do not beat RF/ExtraTrees/MLP for quantum yield. The next task is to make a final combined comparison table/figure and prepare presentation-ready conclusions.
 ```
 
 ---
 
-# Planned Next Feature — All-Model Prediction Interface
+# Planned Next Feature â€” All-Model Prediction Interface
 
 ## Motivation
 
@@ -614,11 +614,11 @@ Desired workflow:
 
 ```text
 input molecule SMILES + solvent SMILES/name
-→ run RF / ExtraTrees / HistGB / MLP / graph_gcn / graph_gin
-→ return emission and QY predictions
-→ show model agreement/disagreement
-→ show applicability-domain similarity
-→ label prediction confidence
+â†’ run RF / ExtraTrees / HistGB / MLP / graph_gcn / graph_gin
+â†’ return emission and QY predictions
+â†’ show model agreement/disagreement
+â†’ show applicability-domain similarity
+â†’ label prediction confidence
 ```
 
 This would make the project feel much more complete because it turns the current model comparison pipeline into a practical fluorescent-molecule prediction tool.
@@ -703,8 +703,8 @@ Std: ...
 Range: ...
 
 Recommended interpretation:
-High agreement → higher confidence
-High disagreement → low confidence / outside-domain warning
+High agreement â†’ higher confidence
+High disagreement â†’ low confidence / outside-domain warning
 ```
 
 ## Most Important Feature: Model Disagreement
@@ -879,5 +879,6 @@ Reuse existing feature generation, graph conversion, applicability-domain, and p
 Use this in the next chat:
 
 ```text
-We have completed GPU graph neural network experiments for ChemFluor. SMILES are now converted into molecular graphs for graph_gcn, graph_gin, and graph_mpnn. GPU training works on Nibi H100. Graph GIN is the best stable graph emission model, with 29.49 ± 0.90 nm MAE across three seeds. Graph GCN reached a best seed of 28.07 nm MAE but is less stable, with 29.73 ± 2.57 nm mean MAE. RF is still best globally for emission at 23.85 nm MAE. Graph models do not beat RF/ExtraTrees/MLP for quantum yield. Seed support has been added to scripts/run_graph_model_experiments.py. The next feature to implement is scripts/predict_all_models.py, where a user inputs chromophore SMILES and solvent SMILES/name, and all trained models predict concurrently with applicability-domain and model-disagreement confidence reporting.
+We have completed GPU graph neural network experiments for ChemFluor. SMILES are now converted into molecular graphs for graph_gcn, graph_gin, and graph_mpnn. GPU training works on Nibi H100. Graph GIN is the best stable graph emission model, with 29.49 Â± 0.90 nm MAE across three seeds. Graph GCN reached a best seed of 28.07 nm MAE but is less stable, with 29.73 Â± 2.57 nm mean MAE. RF is still best globally for emission at 23.85 nm MAE. Graph models do not beat RF/ExtraTrees/MLP for quantum yield. Seed support has been added to scripts/run_graph_model_experiments.py. The next feature to implement is scripts/predict_all_models.py, where a user inputs chromophore SMILES and solvent SMILES/name, and all trained models predict concurrently with applicability-domain and model-disagreement confidence reporting.
 ```
+

@@ -1,4 +1,4 @@
-# ChemFluor Development Notes
+﻿# ChemFluor Development Notes
 
 This file summarizes the current ChemFluor development state so future work can continue without needing to reconstruct the full chat history.
 
@@ -11,13 +11,13 @@ ChemFluor started as a fluorescence-property prediction workflow. It has now bee
 The current goal is:
 
 ```text
-molecule + solvent → predicted optical properties
+molecule + solvent â†’ predicted optical properties
 ```
 
 and the first inverse-design extension is:
 
 ```text
-target emission + solvent + candidate molecules → ranked candidate fluorophores
+target emission + solvent + candidate molecules â†’ ranked candidate fluorophores
 ```
 
 The current inverse-design step is not full neural generation yet. It uses rule-based scaffold enumeration to generate chemically reasonable candidates, then uses trained ML models to score and rank those candidates.
@@ -25,13 +25,13 @@ The current inverse-design step is not full neural generation yet. It uses rule-
 The long-term goal is to move toward a Gen-DL-like workflow:
 
 ```text
-desired optical properties + solvent → generated molecule
+desired optical properties + solvent â†’ generated molecule
 ```
 
 but the current practical intermediate step is:
 
 ```text
-known fluorophore scaffolds + substituents → candidate molecules → model-ranked candidates
+known fluorophore scaffolds + substituents â†’ candidate molecules â†’ model-ranked candidates
 ```
 
 ---
@@ -260,7 +260,7 @@ These should not be committed to GitHub.
 
 Random Forest was the strongest model overall by MAE.
 
-| Target         |     MAE |    RMSE |     R² |
+| Target         |     MAE |    RMSE |     RÂ² |
 | -------------- | ------: | ------: | -----: |
 | absorption_nm  | 23.5941 | 39.9978 | 0.8398 |
 | emission_nm    | 31.3509 | 46.0230 | 0.7616 |
@@ -278,7 +278,7 @@ Interpretation:
 
 ## 3.2 HistGradientBoosting Results
 
-| Target         |     MAE |    RMSE |     R² |
+| Target         |     MAE |    RMSE |     RÂ² |
 | -------------- | ------: | ------: | -----: |
 | absorption_nm  | 25.1528 | 37.0026 | 0.8629 |
 | emission_nm    | 33.4053 | 45.7103 | 0.7649 |
@@ -288,7 +288,7 @@ Interpretation:
 
 Interpretation:
 
-* HistGB is competitive by R² for some targets.
+* HistGB is competitive by RÂ² for some targets.
 * Random Forest is still the better main baseline because it has better MAE overall.
 
 ---
@@ -671,7 +671,7 @@ Interpretation:
 
 * 520 nm target strongly prefers N-butyl naphthalimide derivatives.
 * Top substituents included cyano, ethoxy, trifluoromethyl, chloro, methoxy, methyl, and fluoro.
-* Most top candidates predicted around 499–506 nm with QY around 0.39–0.42.
+* Most top candidates predicted around 499â€“506 nm with QY around 0.39â€“0.42.
 
 ## 7.3 600 nm Screening
 
@@ -728,7 +728,7 @@ coumarin_4_methyl_7_substituted        1
 Interpretation:
 
 * Current candidate library does not reach close enough to 600 nm.
-* Best candidates are amino-substituted N-butyl naphthalimides around 562–563 nm.
+* Best candidates are amino-substituted N-butyl naphthalimides around 562â€“563 nm.
 * Need more red-shifted scaffolds for true orange/red screening.
 
 ## 7.4 Summary Table
@@ -832,7 +832,7 @@ git push
 Local project root used in development:
 
 ```text
-C:\Users\CL\OneDrive\Desktop\python\ChemFluor_Project_synced
+C:\Users\CL\OneDrive\Desktop\python\FluorCast
 ```
 
 Virtual environment:
@@ -1100,7 +1100,7 @@ nearest_training_similarity
 outside_applicability_domain = True/False
 ```
 
-This is important because model-ranked generated candidates may be outside the model’s reliable chemical space.
+This is important because model-ranked generated candidates may be outside the modelâ€™s reliable chemical space.
 
 ## 11.5 Improve Quantum Yield Modeling
 
@@ -1161,7 +1161,7 @@ I expanded ChemFluor by adding the Deep4Chem chromophore dataset, standardized b
 
 I then added a first inverse-design layer. Instead of using neural generation immediately, I implemented rule-based scaffold enumeration using coumarin and naphthalimide templates with different substituents. This generated 59 valid candidate molecules. I screened those candidates in ethanol for target emissions of 450, 520, and 600 nm, and added Morgan fingerprint Tanimoto applicability-domain warnings so lower-similarity candidates can be treated as lower-confidence extrapolations.
 
-For 450 nm, the top candidates were mixed between naphthalimide and coumarin scaffolds. For 520 nm, the model strongly preferred N-butyl naphthalimide derivatives. For 600 nm, the best candidates were around 562–563 nm, which shows the current library is not red-shifted enough and needs expanded scaffold families.
+For 450 nm, the top candidates were mixed between naphthalimide and coumarin scaffolds. For 520 nm, the model strongly preferred N-butyl naphthalimide derivatives. For 600 nm, the best candidates were around 562â€“563 nm, which shows the current library is not red-shifted enough and needs expanded scaffold families.
 ```
 
 Important wording:
@@ -1231,3 +1231,4 @@ confirmed fluorescence values
 ```
 
 The model predictions are hypotheses for prioritization, not experimental truth.
+

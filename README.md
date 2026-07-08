@@ -120,14 +120,14 @@ Clone the repo if it is not already on Nibi:
 
 ```bash
 cd ~/scratch
-git clone https://github.com/chrislleung/fluorcast.git ChemFluor_Project
-cd ChemFluor_Project
+git clone https://github.com/chrislleung/fluorcast.git FluorCast
+cd FluorCast
 ```
 
 If it already exists:
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 git pull origin main
 ```
 
@@ -145,7 +145,7 @@ source ~/scratch/chemfluor_env/bin/activate
 If the environment does not exist yet:
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 
 module purge
 module load python/3.11
@@ -175,7 +175,7 @@ The required CSV files are included in the GitHub repository, so no separate `sc
 Verify the files on Nibi:
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 
 ls -lh data/chemfluor_data.csv
 ls -lh data/solvent_descriptors.csv
@@ -231,7 +231,7 @@ experiments. Absorption and paired spectral/Stokes workflows are handled by the
 hybrid and paired spectral scripts below.
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 sbatch slurm/base_models/run_model_experiments_fluodb.sbatch
 ```
 
@@ -256,7 +256,7 @@ outputs/model_experiments_fluodb/
 This trains MLP baselines and compares them with the tree-model results.
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 sbatch slurm/base_models/run_neural_experiments.sbatch
 ```
 
@@ -293,7 +293,7 @@ slurm/base_models/run_graph_gin_mpnn_emission_gpu.sbatch
 Recommended emission stability runs:
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 sbatch slurm/base_models/run_graph_gin_emission_3seeds_gpu.sbatch
 sbatch slurm/base_models/run_graph_gcn_emission_3seeds_gpu.sbatch
 ```
@@ -334,7 +334,7 @@ a second split, and evaluate only on the final held-out split. Run one target
 and split at a time.
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 
 export FLUORCAST_TARGET_NAME="absorption_nm"
 export FLUORCAST_SPLIT_TYPE="molecule"
@@ -387,7 +387,7 @@ and emission, then calculate Stokes shift from those paired predictions. Stokes
 shift is not directly modeled in this workflow.
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 
 export FLUORCAST_SPLIT_TYPE="molecule"
 export FLUORCAST_SEED="0"
@@ -422,7 +422,7 @@ calculates Stokes shift from the paired absorption/emission predictions, and
 writes full JSON and Markdown reports.
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 
 export FLUORCAST_SMILES="YOUR_CHROMOPHORE_SMILES"
 export FLUORCAST_SOLVENT_SMILES="YOUR_SOLVENT_SMILES"
@@ -449,7 +449,7 @@ Use `scripts/predict_all_models.py` after trained base-model artifacts exist.
 For the prepared benchmark/presentation prediction, use the included Slurm script:
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 sbatch slurm/base_models/run_predict_all_models.sbatch
 ```
 
@@ -679,3 +679,4 @@ python scripts/check_molecule_in_dataset.py \
 
 Use `--smiles-column` and `--solvent-column` for datasets with nonstandard column
 names. Invalid dataset SMILES are skipped and counted in the terminal summary.
+

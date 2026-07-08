@@ -1,4 +1,4 @@
-# Three-way hybrid ensemble experiment
+﻿# Three-way hybrid ensemble experiment
 
 This workflow trains base models on one split, trains the hybrid ensemble from predictions on a second split, and reports metrics only on an untouched final split. Molecule and scaffold modes keep their respective groups disjoint and write a machine-readable leakage check.
 
@@ -45,3 +45,4 @@ models/production_hybrid/quantum_yield/
 ```
 
 These trained artifacts live on Nibi and are intentionally excluded from Git.
+

@@ -1,4 +1,4 @@
-# ChemFluor Development Notes — Model Comparison + Neural Network Next Steps
+﻿# ChemFluor Development Notes â€” Model Comparison + Neural Network Next Steps
 
 ## Current Project State
 
@@ -23,7 +23,7 @@ data/solvent_descriptors_expanded_deep4chem.csv
 The current Nibi project folder is:
 
 ```bash
-~/scratch/ChemFluor_Project
+~/scratch/FluorCast
 ```
 
 The Nibi virtual environment is:
@@ -35,7 +35,7 @@ The Nibi virtual environment is:
 Standard Nibi environment setup:
 
 ```bash
-cd ~/scratch/ChemFluor_Project
+cd ~/scratch/FluorCast
 
 module purge
 module load python/3.11
@@ -124,7 +124,7 @@ quantum_yield
 
 ### Overall Emission MAE
 
-| Model      | Emission MAE |    RMSE |     R² |
+| Model      | Emission MAE |    RMSE |     RÂ² |
 | ---------- | -----------: | ------: | -----: |
 | RF         |   23.8493 nm | 37.8891 | 0.8375 |
 | ExtraTrees |   28.2001 nm | 48.2149 | 0.7369 |
@@ -139,7 +139,7 @@ Random Forest is still the best general-purpose emission model.
 
 ### Overall Quantum Yield MAE
 
-| Model      | QY MAE |   RMSE |     R² |
+| Model      | QY MAE |   RMSE |     RÂ² |
 | ---------- | -----: | -----: | -----: |
 | ExtraTrees | 0.1464 | 0.2203 | 0.5052 |
 | RF         | 0.1505 | 0.2113 | 0.5448 |
@@ -149,7 +149,7 @@ Random Forest is still the best general-purpose emission model.
 Conclusion:
 
 ```text
-ExtraTrees is slightly best for overall quantum yield MAE, but RF is very close and has better QY R².
+ExtraTrees is slightly best for overall quantum yield MAE, but RF is very close and has better QY RÂ².
 ```
 
 ### Red/NIR Region MAE
@@ -252,7 +252,7 @@ Random Forest remains the strongest general model on the expanded ChemFluor + De
 
 ## Next Goal: Try Better Neural Network Models
 
-The first MLP experiment underperformed locally/debug, but it was a basic MLP. The next step should not be “give up on neural networks.” Instead, test better neural-network designs.
+The first MLP experiment underperformed locally/debug, but it was a basic MLP. The next step should not be â€œgive up on neural networks.â€ Instead, test better neural-network designs.
 
 The current MLP likely struggled because:
 
@@ -307,20 +307,20 @@ Morgan FP + MACCS + RDKit descriptors + solvent descriptors
 Architecture:
 
 ```text
-Linear(input_dim → 1024)
+Linear(input_dim â†’ 1024)
 BatchNorm
 ReLU
 Dropout(0.2)
 
-Linear(1024 → 512)
+Linear(1024 â†’ 512)
 BatchNorm
 ReLU
 Dropout(0.2)
 
-Linear(512 → 256)
+Linear(512 â†’ 256)
 ReLU
 
-Linear(256 → output)
+Linear(256 â†’ output)
 ```
 
 Use:
@@ -363,8 +363,8 @@ A stronger long-term neural model would use molecular graphs instead of only fin
 Potential approach:
 
 ```text
-SMILES → molecular graph → graph neural network embedding
-solvent descriptors → dense vector
+SMILES â†’ molecular graph â†’ graph neural network embedding
+solvent descriptors â†’ dense vector
 concatenate molecule embedding + solvent vector
 predict emission/QY
 ```
@@ -377,7 +377,7 @@ DGL-LifeSci
 Chemprop-style message passing neural network
 ```
 
-This is more work but much more “real neural network for chemistry” than MLP on fingerprints.
+This is more work but much more â€œreal neural network for chemistryâ€ than MLP on fingerprints.
 
 ## Recommended Next Practical Step
 
@@ -450,3 +450,4 @@ The next chat should continue from this point:
 ```text
 We have finished a full tree-model comparison on ChemFluor + Deep4Chem + FluoDB-Lite. RF is best overall for emission and red/NIR. ExtraTrees is slightly best for QY. HistGB is worse overall but much better on one difficult low-similarity benchmark molecule. I now want to implement stronger neural-network experiments, starting with tuned MLPs and PyTorch MLP/multitask models, then eventually graph neural networks.
 ```
+

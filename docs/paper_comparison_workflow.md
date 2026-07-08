@@ -1,4 +1,4 @@
-# Paper comparison workflow
+﻿# Paper comparison workflow
 
 The reproducible manuscript pipeline compares FluorCast models across random,
 molecule-grouped, and Bemis-Murcko scaffold-grouped splits. All
@@ -69,3 +69,4 @@ directories, `*.joblib`, `*.pkl`, `*.out`, and `*.err`.
 Source code and tests belong in Git. Manuscript-only Python code must remain
 under `scripts/manuscript/`; broadly reusable project logic may instead live
 under `src/chemfluor/`.
+

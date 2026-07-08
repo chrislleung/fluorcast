@@ -1,6 +1,6 @@
-# ChemFluor Notebooks Folder Guide
+﻿# ChemFluor Notebooks Folder Guide
 
-Put these six files inside `ChemFluor_Project/notebooks/`.
+Put these six files inside `FluorCast/notebooks/`.
 
 ## Required notebook files
 
@@ -105,3 +105,4 @@ if PROJECT_ROOT.name == "notebooks":
 sys.path.insert(0, str(PROJECT_ROOT))
 print("Project root:", PROJECT_ROOT)
 ```
+

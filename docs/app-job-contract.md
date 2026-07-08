@@ -1,4 +1,4 @@
-# FluorCast desktop prediction job contract
+﻿# FluorCast desktop prediction job contract
 
 This document defines the stable file boundary between the future FluorCast desktop application and the prediction engine running on NIBI. The desktop application writes `input.json`, submits a Slurm job, and reads `output.json`; it does not load models or run predictions locally.
 
@@ -167,3 +167,4 @@ Validation failures do not invoke a prediction backend.
 ## Handoff behavior
 
 The desktop application should treat a missing or unreadable `output.json` as an infrastructure/transfer condition, not a model result. Once valid output is available, `status` and `error.code` determine the application state. Warnings are displayable context and never replace status handling.
+

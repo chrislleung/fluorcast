@@ -1,4 +1,4 @@
-# Running FluorCast JSON jobs on NIBI
+﻿# Running FluorCast JSON jobs on NIBI
 
 The JSON files are the job contract between FluorCast and the future portal.
 Each command reads one input JSON and writes one success or failure JSON. These
@@ -38,7 +38,7 @@ Submit the same prediction through Slurm:
 
 ```bash
 mkdir -p /home/chrisl/scratch/fluorcast-jobs/job_test_001
-export FLUORCAST_REPO=/home/chrisl/scratch/ChemFluor_Project
+export FLUORCAST_REPO=/home/chrisl/scratch/FluorCast
 export FLUORCAST_INPUT_JSON=/home/chrisl/scratch/fluorcast-jobs/job_test_001/input.json
 export FLUORCAST_OUTPUT_JSON=/home/chrisl/scratch/fluorcast-jobs/job_test_001/output.json
 sbatch slurm/run_prediction_job.sbatch
@@ -76,10 +76,10 @@ python scripts/run_duplicate_check_job.py \
 Submit it through Slurm:
 
 ```bash
-export FLUORCAST_REPO=/home/chrisl/scratch/ChemFluor_Project
+export FLUORCAST_REPO=/home/chrisl/scratch/FluorCast
 export FLUORCAST_INPUT_JSON=/home/chrisl/scratch/fluorcast-jobs/job_test_001/duplicate-input.json
 export FLUORCAST_OUTPUT_JSON=/home/chrisl/scratch/fluorcast-jobs/job_test_001/duplicate-output.json
-export FLUORCAST_DATASET=/home/chrisl/scratch/ChemFluor_Project/data/processed/fluodb_lite/combined_deduplicated.csv
+export FLUORCAST_DATASET=/home/chrisl/scratch/FluorCast/data/processed/fluodb_lite/combined_deduplicated.csv
 sbatch slurm/run_duplicate_check_job.sbatch
 ```
 
@@ -106,3 +106,4 @@ Portal integration will later create the input JSON in a per-job directory,
 submit the appropriate `sbatch` wrapper, track the Slurm job, and read the
 output JSON when it finishes. SSH submission, portal persistence, and
 Supabase access remain outside the Python runners and these wrappers.
+

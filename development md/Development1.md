@@ -1,4 +1,4 @@
-# ChemFluor Project: Machine Learning Pipeline Summary
+﻿# ChemFluor Project: Machine Learning Pipeline Summary
 
 This document serves as a complete summary of the machine learning pipeline built to predict the Wavelength (Emission/nm) and Brightness (PLQY) of fluorescent chemicals based on their molecular structure (SMILES) and solvent.
 
@@ -23,7 +23,7 @@ The machine learning algorithms cannot read text (like "Toluene" or "CCO"). We t
     * `TPSA` (Topological Polar Surface Area / Electric Charge)
     * `RingCount` (Aromaticity)
 
-**Final Feature Matrix (`X`) Shape:** `3090 rows × 2109 columns` (2048 Fingerprints + 55 Solvents + 6 Physics).
+**Final Feature Matrix (`X`) Shape:** `3090 rows Ã— 2109 columns` (2048 Fingerprints + 55 Solvents + 6 Physics).
 
 ---
 

@@ -1,8 +1,8 @@
-# Paired absorption/emission Stokes workflow
+﻿# Paired absorption/emission Stokes workflow
 
 FluorCast calculates Stokes shift from separately modeled absorption and emission maxima. It does not train a direct Stokes-shift model. This keeps the prediction tied to the two observable spectral endpoints and avoids introducing a third model with an independently learned error profile.
 
-Absorption and emission must be evaluated on the same molecule–solvent rows. Subtracting predictions from unrelated target-specific test splits would not describe any real paired observation and would make Stokes metrics invalid. The paired workflow therefore builds one dataset, assigns one three-way split, and uses those same row assignments for both targets. Base models train on `base_model_train`, hybrid ensembles train and calibrate on `hybrid_meta_train`, and all reported metrics use only `final_test`.
+Absorption and emission must be evaluated on the same moleculeâ€“solvent rows. Subtracting predictions from unrelated target-specific test splits would not describe any real paired observation and would make Stokes metrics invalid. The paired workflow therefore builds one dataset, assigns one three-way split, and uses those same row assignments for both targets. Base models train on `base_model_train`, hybrid ensembles train and calibrate on `hybrid_meta_train`, and all reported metrics use only `final_test`.
 
 ## Smoke test
 
@@ -61,3 +61,4 @@ python scripts/render_combined_prediction_report.py `
   --out-json outputs/combined_report.json `
   --out-md outputs/combined_report.md
 ```
+
