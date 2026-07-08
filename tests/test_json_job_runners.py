@@ -211,6 +211,49 @@ def install_model_availability_fixture(monkeypatch: Any) -> None:
 
     monkeypatch.setattr(prediction_runner, "_collect_model", collect)
 
+    def collect_all(_: dict[str, Any]) -> Any:
+        warnings = [
+            prediction_runner._unavailable_message(name)
+            for name in ("gbdt", "histgb", "graph_model_later")
+        ]
+        return (
+            pd.concat([prediction_table("rf"), prediction_table("extratrees")]),
+            warnings,
+            "CCO",
+            "O",
+        )
+
+    monkeypatch.setattr(prediction_runner, "_collect_all_models", collect_all)
+
+
+def test_model_choice_all_respects_model_directory_environment(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    tree_dir = tmp_path / "custom_tree"
+    neural_dir = tmp_path / "custom_neural"
+    captured: dict[str, Any] = {}
+
+    def collect_predictions(args: Any) -> Any:
+        captured["tree_model_dir"] = args.tree_model_dir
+        captured["neural_model_dir"] = args.neural_model_dir
+        return prediction_table("rf"), [], "CCO", "O", None
+
+    monkeypatch.setenv("FLUORCAST_TREE_MODEL_DIR", str(tree_dir))
+    monkeypatch.setenv("FLUORCAST_NEURAL_MODEL_DIR", str(neural_dir))
+    monkeypatch.setattr(
+        prediction_runner.predict_all_models, "collect_predictions", collect_predictions
+    )
+
+    predictions, _, _, _ = prediction_runner.fluorcast_prediction_backend(
+        prediction_input()
+    )
+
+    assert captured == {
+        "tree_model_dir": tree_dir,
+        "neural_model_dir": neural_dir,
+    }
+    assert [prediction["model_name"] for prediction in predictions] == ["rf"]
+
 
 def test_model_choice_all_skips_unavailable_experimental_models(
     monkeypatch: Any,

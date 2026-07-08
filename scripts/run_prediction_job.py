@@ -114,9 +114,42 @@ def _collect_model(
         solvent_descriptors=PROJECT_ROOT / predict_all_models.DEFAULT_SOLVENT_DESCRIPTORS,
         standardized_combined=PROJECT_ROOT / predict_all_models.DEFAULT_STANDARDIZED_COMBINED,
         tree_model_dir=(
-            PROJECT_ROOT / predict_all_models.DEFAULT_TREE_MODEL_DIR / str(artifact_dir)
+            _path_from_env(
+                "FLUORCAST_TREE_MODEL_DIR",
+                PROJECT_ROOT / predict_all_models.DEFAULT_TREE_MODEL_DIR,
+            )
+            / str(artifact_dir)
         ),
         neural_model_dir=PROJECT_ROOT / "models" / "__json_runner_disabled_neural__",
+        graph_model_dirs=[],
+        known_emission_nm=None,
+        known_quantum_yield=None,
+        applicability_threshold=predict_all_models.DEFAULT_APPLICABILITY_THRESHOLD,
+    )
+    table, warnings, canonical_molecule, canonical_solvent, _ = (
+        predict_all_models.collect_predictions(args)
+    )
+    return table, warnings, canonical_molecule, str(canonical_solvent)
+
+
+def _collect_all_models(
+    payload: dict[str, Any],
+) -> tuple[pd.DataFrame, list[str], str, str]:
+    """Run all discoverable tree and neural artifacts from configured roots."""
+    args = SimpleNamespace(
+        smiles=payload["molecule_smiles"],
+        solvent=None,
+        solvent_smiles=payload["solvent_smiles"],
+        solvent_descriptors=PROJECT_ROOT / predict_all_models.DEFAULT_SOLVENT_DESCRIPTORS,
+        standardized_combined=PROJECT_ROOT / predict_all_models.DEFAULT_STANDARDIZED_COMBINED,
+        tree_model_dir=_path_from_env(
+            "FLUORCAST_TREE_MODEL_DIR",
+            PROJECT_ROOT / predict_all_models.DEFAULT_TREE_MODEL_DIR,
+        ),
+        neural_model_dir=_path_from_env(
+            "FLUORCAST_NEURAL_MODEL_DIR",
+            PROJECT_ROOT / predict_all_models.DEFAULT_NEURAL_MODEL_DIR,
+        ),
         graph_model_dirs=[],
         known_emission_nm=None,
         known_quantum_yield=None,
@@ -205,8 +238,14 @@ def _hybrid_prediction_backend(
         smiles=payload["molecule_smiles"],
         solvent_smiles=payload["solvent_smiles"],
         out_dir=out_dir,
-        tree_model_dir=PROJECT_ROOT / predict_all_models.DEFAULT_TREE_MODEL_DIR,
-        neural_model_dir=PROJECT_ROOT / predict_all_models.DEFAULT_NEURAL_MODEL_DIR,
+        tree_model_dir=_path_from_env(
+            "FLUORCAST_TREE_MODEL_DIR",
+            PROJECT_ROOT / predict_all_models.DEFAULT_TREE_MODEL_DIR,
+        ),
+        neural_model_dir=_path_from_env(
+            "FLUORCAST_NEURAL_MODEL_DIR",
+            PROJECT_ROOT / predict_all_models.DEFAULT_NEURAL_MODEL_DIR,
+        ),
         graph_model_dirs=[],
         absorption_hybrid_model_dir=_path_from_env(
             "FLUORCAST_ABS_HYBRID_DIR", DEFAULT_ABS_HYBRID_DIR
@@ -253,11 +292,23 @@ def fluorcast_prediction_backend(
     choice = str(payload["model_choice"])
     if choice == "hybrid":
         return _hybrid_prediction_backend(payload)
-    requested_models = (
-        ["rf", "extratrees", "gbdt", "histgb", "graph_model_later"]
-        if choice == "all"
-        else [choice]
-    )
+    if choice == "all":
+        table, warnings, canonical_molecule, canonical_solvent = _collect_all_models(
+            payload
+        )
+        if table.empty:
+            raise JobError(
+                "PREDICTION_BACKEND_NOT_CONNECTED",
+                "No available model artifacts produced predictions.",
+                warnings=warnings,
+            )
+        return (
+            _prediction_records(table),
+            warnings,
+            canonical_molecule,
+            canonical_solvent,
+        )
+    requested_models = [choice]
     tables = []
     warnings: list[str] = []
     canonical_molecule: str | None = None
@@ -303,6 +354,12 @@ def fluorcast_prediction_backend(
         )
 
     selected = pd.concat(tables, ignore_index=True)
+    predictions = _prediction_records(selected)
+    assert canonical_molecule is not None and canonical_solvent is not None
+    return predictions, warnings, canonical_molecule, canonical_solvent
+
+
+def _prediction_records(selected: pd.DataFrame) -> list[dict[str, Any]]:
     predictions = []
     for row in selected.to_dict(orient="records"):
         predictions.append(
@@ -321,8 +378,7 @@ def fluorcast_prediction_backend(
                 "warnings": [],
             }
         )
-    assert canonical_molecule is not None and canonical_solvent is not None
-    return predictions, warnings, canonical_molecule, canonical_solvent
+    return predictions
 
 
 def write_output(path: Path, payload: dict[str, Any]) -> None:
