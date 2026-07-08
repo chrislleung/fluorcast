@@ -93,7 +93,20 @@ def _nullable_number(value: Any) -> float | None:
     if value is None:
         return None
     number = float(value)
-    return None if math.isnan(number) else number
+    return number if math.isfinite(number) else None
+
+
+def _nullable_text(value: Any) -> str | None:
+    if value is None or pd.isna(value):
+        return None
+    text = str(value)
+    return text or None
+
+
+def _nullable_bool(value: Any) -> bool | None:
+    if value is None or pd.isna(value):
+        return None
+    return bool(value)
 
 
 def _collect_model(
@@ -362,22 +375,37 @@ def fluorcast_prediction_backend(
 def _prediction_records(selected: pd.DataFrame) -> list[dict[str, Any]]:
     predictions = []
     for row in selected.to_dict(orient="records"):
-        predictions.append(
-            {
-                "model_name": str(row["model"]),
-                "predicted_emission_nm": _nullable_number(
-                    row.get("predicted_emission_nm")
-                ),
-                "predicted_quantum_yield": _nullable_number(
-                    row.get("predicted_quantum_yield")
-                ),
-                "nearest_training_similarity": _nullable_number(
-                    row.get("nearest_training_similarity")
-                ),
-                "nearest_training_smiles": row.get("nearest_training_smiles") or None,
-                "warnings": [],
-            }
-        )
+        absorption = _nullable_number(row.get("predicted_absorption_nm"))
+        emission = _nullable_number(row.get("predicted_emission_nm"))
+        record = {
+            "model_name": str(row["model"]),
+            "predicted_absorption_nm": absorption,
+            "predicted_emission_nm": emission,
+            "predicted_quantum_yield": _nullable_number(
+                row.get("predicted_quantum_yield")
+            ),
+            "nearest_training_similarity": _nullable_number(
+                row.get("nearest_training_similarity")
+            ),
+            "nearest_training_smiles": _nullable_text(
+                row.get("nearest_training_smiles")
+            ),
+            "confidence_label": _nullable_text(row.get("confidence_label")),
+            "outside_applicability_domain": _nullable_bool(
+                row.get("outside_applicability_domain")
+            ),
+            "warnings": [],
+        }
+        if absorption is not None and emission is not None:
+            stokes_nm = emission - absorption
+            record["predicted_stokes_shift_nm"] = stokes_nm
+            record["predicted_stokes_shift_cm^-1"] = (
+                1e7 / absorption - 1e7 / emission
+                if absorption > 0 and emission > 0
+                else None
+            )
+            record["physically_valid_stokes"] = stokes_nm >= 0
+        predictions.append(record)
     return predictions
 
 

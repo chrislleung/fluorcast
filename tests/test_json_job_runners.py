@@ -5,7 +5,10 @@ import json
 from pathlib import Path
 from typing import Any
 
+import joblib
+import numpy as np
 import pandas as pd
+import pytest
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -22,6 +25,15 @@ def load_script(name: str) -> Any:
 
 prediction_runner = load_script("run_prediction_job")
 duplicate_runner = load_script("run_duplicate_check_job")
+
+
+class ConstantRegressor:
+    def __init__(self, value: float, n_features: int = 33) -> None:
+        self.value = value
+        self.n_features_in_ = n_features
+
+    def predict(self, features: np.ndarray) -> np.ndarray:
+        return np.full(features.shape[0], self.value, dtype=float)
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:
@@ -191,6 +203,8 @@ def prediction_table(model_name: str) -> pd.DataFrame:
                 "predicted_quantum_yield": 0.3,
                 "nearest_training_similarity": 0.75,
                 "nearest_training_smiles": "CCO",
+                "confidence_label": "high",
+                "outside_applicability_domain": False,
             }
         ]
     )
@@ -268,12 +282,72 @@ def test_model_choice_all_skips_unavailable_experimental_models(
         "extratrees",
     ]
     for prediction in predictions:
-        assert "predicted_absorption_nm" not in prediction
+        assert prediction["predicted_absorption_nm"] == 350.0
         assert prediction["predicted_emission_nm"] == 500.0
         assert prediction["predicted_quantum_yield"] == 0.3
+        assert prediction["confidence_label"] == "high"
+        assert prediction["outside_applicability_domain"] is False
+        assert prediction["predicted_stokes_shift_nm"] == 150.0
+        assert prediction["predicted_stokes_shift_cm^-1"] == pytest.approx(
+            1e7 / 350.0 - 1e7 / 500.0
+        )
+        assert prediction["physically_valid_stokes"] is True
     assert any("Skipped model gbdt" in warning for warning in warnings)
     assert any("Skipped model histgb" in warning for warning in warnings)
     assert any("Skipped model graph_model_later" in warning for warning in warnings)
+
+
+def test_model_choice_all_json_preserves_absorption_and_stokes(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    tree_root = tmp_path / "absorption_capable_models"
+    model_dir = tree_root / "rf"
+    model_dir.mkdir(parents=True)
+    metadata = {
+        "fingerprint_radius": 2,
+        "fingerprint_n_bits": 32,
+        "solvent_descriptor_columns_used": ["dielectric_constant"],
+        "median_values_used_for_imputation": {
+            target: {"dielectric_constant": 1.0}
+            for target in ("absorption_nm", "emission_nm", "quantum_yield")
+        },
+        "model_type": "rf",
+        "target_columns": ["absorption_nm", "emission_nm", "quantum_yield"],
+    }
+    (model_dir / "feature_metadata.json").write_text(
+        json.dumps(metadata), encoding="utf-8"
+    )
+    pd.DataFrame({"canonical_chromophore_smiles": ["CCO"]}).to_csv(
+        model_dir / "combined_modeling_rows_after_feature_merge.csv", index=False
+    )
+    joblib.dump(ConstantRegressor(350.0), model_dir / "absorption_nm_rf.joblib")
+    joblib.dump(ConstantRegressor(500.0), model_dir / "emission_nm_rf.joblib")
+    joblib.dump(ConstantRegressor(0.3), model_dir / "quantum_yield_rf.joblib")
+    monkeypatch.setenv("FLUORCAST_TREE_MODEL_DIR", str(tree_root))
+    monkeypatch.setenv("FLUORCAST_NEURAL_MODEL_DIR", str(tmp_path / "missing_neural"))
+    input_path = tmp_path / "input.json"
+    output_path = tmp_path / "output.json"
+    write_json(input_path, prediction_input())
+
+    assert prediction_runner.run_job(input_path, output_path) == 0
+
+    prediction = json.loads(output_path.read_text(encoding="utf-8"))["predictions"][0]
+    assert prediction["predicted_absorption_nm"] == 350.0
+    assert prediction["predicted_stokes_shift_nm"] == 150.0
+    assert prediction["predicted_stokes_shift_cm^-1"] == pytest.approx(
+        1e7 / 350.0 - 1e7 / 500.0
+    )
+
+
+def test_prediction_records_remain_compatible_without_absorption() -> None:
+    table = prediction_table("rf").drop(columns=["predicted_absorption_nm"])
+
+    prediction = prediction_runner._prediction_records(table)[0]
+
+    assert prediction["predicted_absorption_nm"] is None
+    assert prediction["predicted_emission_nm"] == 500.0
+    assert "predicted_stokes_shift_nm" not in prediction
+    assert "predicted_stokes_shift_cm^-1" not in prediction
 
 
 def test_model_choice_rf_returns_only_rf(monkeypatch: Any) -> None:
