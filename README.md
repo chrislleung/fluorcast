@@ -335,13 +335,12 @@ outputs/graph_gcn_qy_gpu/
 
 ---
 
-### 4. Hybrid Three-Way Experiments
+4. Hybrid Three-Way Experiments
 
-Hybrid experiments train base models on one split, train the hybrid ensemble on
-a second split, and evaluate only on the final held-out split. Run one target
-and split at a time.
+Hybrid experiments train base models on one split, train the hybrid ensemble on a second split, and evaluate only on the final held-out split. Run one target and split at a time.
 
-```bash
+For production molecule-split hybrid artifacts:
+
 cd ~/scratch/FluorCast
 mkdir -p outputs/slurm
 
@@ -351,41 +350,65 @@ export FLUORCAST_SEED="0"
 export FLUORCAST_OUT_DIR="outputs/hybrid_three_way/molecule/absorption_nm"
 export FLUORCAST_MODEL_OUT_DIR="models/production_hybrid/absorption_nm"
 sbatch slurm/run_hybrid_three_way_experiment.sbatch
-```
 
-Repeat for the other production targets by changing both FLUORCAST_TARGET_NAME
-and FLUORCAST_MODEL_OUT_DIR:
-```bash
+Repeat for emission:
+
 export FLUORCAST_TARGET_NAME="emission_nm"
+export FLUORCAST_SPLIT_TYPE="molecule"
+export FLUORCAST_SEED="0"
+export FLUORCAST_OUT_DIR="outputs/hybrid_three_way/molecule/emission_nm"
 export FLUORCAST_MODEL_OUT_DIR="models/production_hybrid/emission_nm"
 sbatch slurm/run_hybrid_three_way_experiment.sbatch
 
+Repeat for quantum yield:
+
 export FLUORCAST_TARGET_NAME="quantum_yield"
+export FLUORCAST_SPLIT_TYPE="molecule"
+export FLUORCAST_SEED="0"
+export FLUORCAST_OUT_DIR="outputs/hybrid_three_way/molecule/quantum_yield"
 export FLUORCAST_MODEL_OUT_DIR="models/production_hybrid/quantum_yield"
 sbatch slurm/run_hybrid_three_way_experiment.sbatch
-```
 
-For scaffold or comparison experiments, write to split-specific folders so
-production models are not overwritten:
-```bash
+For scaffold or comparison experiments, write to split-specific folders so production models are not overwritten:
+
 export FLUORCAST_TARGET_NAME="absorption_nm"
 export FLUORCAST_SPLIT_TYPE="scaffold"
 export FLUORCAST_SEED="0"
 export FLUORCAST_OUT_DIR="outputs/hybrid_three_way/scaffold/absorption_nm"
 export FLUORCAST_MODEL_OUT_DIR="models/hybrid_three_way/scaffold/absorption_nm"
 sbatch slurm/run_hybrid_three_way_experiment.sbatch
-```
-Repeat by changing FLUORCAST_TARGET_NAME to emission_nm or quantum_yield.
+
+For scaffold emission:
+
+export FLUORCAST_TARGET_NAME="emission_nm"
+export FLUORCAST_SPLIT_TYPE="scaffold"
+export FLUORCAST_SEED="0"
+export FLUORCAST_OUT_DIR="outputs/hybrid_three_way/scaffold/emission_nm"
+export FLUORCAST_MODEL_OUT_DIR="models/hybrid_three_way/scaffold/emission_nm"
+sbatch slurm/run_hybrid_three_way_experiment.sbatch
+
+For scaffold quantum yield:
+
+export FLUORCAST_TARGET_NAME="quantum_yield"
+export FLUORCAST_SPLIT_TYPE="scaffold"
+export FLUORCAST_SEED="0"
+export FLUORCAST_OUT_DIR="outputs/hybrid_three_way/scaffold/quantum_yield"
+export FLUORCAST_MODEL_OUT_DIR="models/hybrid_three_way/scaffold/quantum_yield"
+sbatch slurm/run_hybrid_three_way_experiment.sbatch
 
 Production hybrid artifacts should be staged on Nibi as:
 
-```text
 models/production_hybrid/absorption_nm/
 models/production_hybrid/emission_nm/
 models/production_hybrid/quantum_yield/
-```
 
-Do not commit these trained model artifacts.
+Comparison hybrid artifacts should be kept separate, for example:
+
+models/hybrid_three_way/scaffold/absorption_nm/
+models/hybrid_three_way/scaffold/emission_nm/
+models/hybrid_three_way/scaffold/quantum_yield/
+
+Do not commit trained model artifacts.
 
 ---
 
