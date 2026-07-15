@@ -78,6 +78,10 @@ models/
 data/generated_candidates/
 data/processed/conforformer_cache/
 conforformer_preprocess_diagnostics/
+conforformer_encoder_diagnostics/
+assets/conforformer/checkpoints/
+assets/conforformer/dictionaries/
+assets/conforformer/downloads/
 #data/processed/fluodb_lite/
 outputs/candidate_screening/
 
