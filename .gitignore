@@ -76,6 +76,7 @@ models/
 
 # Candidate-screening outputs are generated and reproducible.
 data/generated_candidates/
+data/processed/conforformer_cache/
 #data/processed/fluodb_lite/
 outputs/candidate_screening/
 
