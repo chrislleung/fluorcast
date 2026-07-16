@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
+import sys
+from types import ModuleType
 
 import numpy as np
 import pytest
@@ -257,3 +259,214 @@ def test_inspect_assets_compatibility_success(tmp_path: Path) -> None:
     assert dictionary.sha256 == compatibility.dictionary_sha256
     assert checkpoint.checkpoint_sha256 == compatibility.checkpoint_sha256
     assert compatibility.compatible
+
+
+def _compat_root(tmp_path: Path, commit: str = "f3095c5ea0218b6b4b2780cd1f43122410e80a7a") -> Path:
+    commit_dir = tmp_path / "configs" / "conforformer"
+    commit_dir.mkdir(parents=True)
+    (commit_dir / "upstream_commit.txt").write_text(commit, encoding="utf-8")
+    return tmp_path
+
+
+def _upstream_data_dir(root: Path) -> Path:
+    path = root / "third_party" / "ConforFormer" / "unimol" / "unimol" / "data"
+    path.mkdir(parents=True)
+    return path
+
+
+def _module(name: str, **attrs: object) -> ModuleType:
+    module = ModuleType(name)
+    for key, value in attrs.items():
+        setattr(module, key, value)
+    return module
+
+
+def _clean_compat_modules() -> None:
+    for name in (
+        "unimol.data.HugeMDB_dataset",
+        "unimol.data.OMol_dataset",
+        "unimol.tasks.unimol_contrast",
+        "unimol.models.unimol_contrast",
+    ):
+        sys.modules.pop(name, None)
+
+
+def test_hmdb_shim_is_applied_only_when_source_file_absent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import chemfluor.conforformer.adapter as adapter
+
+    _clean_compat_modules()
+    root = _compat_root(tmp_path)
+
+    def import_missing_hmdb(name: str):
+        if name == adapter.HMDB_MODULE_NAME:
+            raise ModuleNotFoundError("missing HugeMDB", name=name)
+        return _module(name)
+
+    monkeypatch.setattr(adapter.importlib, "import_module", import_missing_hmdb)
+    diagnostics = adapter.ensure_upstream_import_compatibility(root)
+    assert diagnostics.hmdb_shim_applied
+    assert "HugeMDB_dataset.py" in diagnostics.hmdb_reason
+    with pytest.raises(RuntimeError, match="missing unimol/data/HugeMDB_dataset.py"):
+        sys.modules[adapter.HMDB_MODULE_NAME].HMDBDataset()
+
+    _clean_compat_modules()
+    _upstream_data_dir(root).joinpath("HugeMDB_dataset.py").write_text("# real file\n", encoding="utf-8")
+    real_hmdb = _module(adapter.HMDB_MODULE_NAME, HMDBDataset=type("RealHMDBDataset", (), {}))
+
+    def import_real_hmdb(name: str):
+        if name == adapter.HMDB_MODULE_NAME:
+            return real_hmdb
+        return _module(name)
+
+    monkeypatch.setattr(adapter.importlib, "import_module", import_real_hmdb)
+    diagnostics = adapter.ensure_upstream_import_compatibility(root)
+    assert not diagnostics.hmdb_shim_applied
+    assert diagnostics.hmdb_reason.startswith("real source file exists")
+
+
+def test_omol_shim_is_applied_only_for_missing_fairchem(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import chemfluor.conforformer.adapter as adapter
+
+    _clean_compat_modules()
+    root = _compat_root(tmp_path)
+
+    def import_missing_fairchem(name: str):
+        if name == adapter.HMDB_MODULE_NAME:
+            return _module(name)
+        if name == adapter.OMOL_MODULE_NAME:
+            raise ModuleNotFoundError("missing fairchem", name="fairchem")
+        return _module(name)
+
+    monkeypatch.setattr(adapter.importlib, "import_module", import_missing_fairchem)
+    diagnostics = adapter.ensure_upstream_import_compatibility(root)
+    assert diagnostics.omol_shim_applied
+    assert "fairchem" in diagnostics.omol_reason
+    with pytest.raises(RuntimeError, match="fairchem is not installed"):
+        sys.modules[adapter.OMOL_MODULE_NAME].OMolDataset()
+
+
+def test_real_dataset_modules_are_preferred_when_available(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import chemfluor.conforformer.adapter as adapter
+
+    _clean_compat_modules()
+    root = _compat_root(tmp_path)
+    real_hmdb = _module(adapter.HMDB_MODULE_NAME, HMDBDataset=type("RealHMDBDataset", (), {}))
+    real_omol = _module(adapter.OMOL_MODULE_NAME, OMolDataset=type("RealOMolDataset", (), {}))
+
+    def import_real(name: str):
+        if name == adapter.HMDB_MODULE_NAME:
+            return real_hmdb
+        if name == adapter.OMOL_MODULE_NAME:
+            return real_omol
+        return _module(name)
+
+    monkeypatch.setattr(adapter.importlib, "import_module", import_real)
+    diagnostics = adapter.ensure_upstream_import_compatibility(root)
+    assert not diagnostics.hmdb_shim_applied
+    assert not diagnostics.omol_shim_applied
+    assert adapter.HMDB_MODULE_NAME not in sys.modules
+    assert adapter.OMOL_MODULE_NAME not in sys.modules
+
+
+def test_unrelated_dataset_import_failures_propagate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import chemfluor.conforformer.adapter as adapter
+
+    _clean_compat_modules()
+    root = _compat_root(tmp_path)
+
+    def import_bad_hmdb_dependency(name: str):
+        if name == adapter.HMDB_MODULE_NAME:
+            raise ModuleNotFoundError("missing unrelated", name="some_dependency")
+        return _module(name)
+
+    monkeypatch.setattr(adapter.importlib, "import_module", import_bad_hmdb_dependency)
+    with pytest.raises(ModuleNotFoundError) as hmdb_error:
+        adapter.ensure_upstream_import_compatibility(root)
+    assert hmdb_error.value.name == "some_dependency"
+
+    def import_bad_omol_dependency(name: str):
+        if name == adapter.HMDB_MODULE_NAME:
+            return _module(name)
+        if name == adapter.OMOL_MODULE_NAME:
+            raise ModuleNotFoundError("missing unrelated", name="some_dependency")
+        return _module(name)
+
+    monkeypatch.setattr(adapter.importlib, "import_module", import_bad_omol_dependency)
+    with pytest.raises(ModuleNotFoundError) as omol_error:
+        adapter.ensure_upstream_import_compatibility(root)
+    assert omol_error.value.name == "some_dependency"
+
+
+def test_compatibility_shim_registration_is_idempotent(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import chemfluor.conforformer.adapter as adapter
+
+    _clean_compat_modules()
+    root = _compat_root(tmp_path)
+
+    def import_missing_optional_datasets(name: str):
+        if name == adapter.HMDB_MODULE_NAME:
+            raise ModuleNotFoundError("missing HugeMDB", name=name)
+        if name == adapter.OMOL_MODULE_NAME:
+            raise ModuleNotFoundError("missing fairchem", name="fairchem")
+        return _module(name)
+
+    monkeypatch.setattr(adapter.importlib, "import_module", import_missing_optional_datasets)
+    first = adapter.ensure_upstream_import_compatibility(root)
+    second = adapter.ensure_upstream_import_compatibility(root)
+    assert first.hmdb_shim_applied and first.omol_shim_applied
+    assert second.hmdb_shim_applied and second.omol_shim_applied
+    assert hasattr(sys.modules[adapter.HMDB_MODULE_NAME], "HMDBDataset")
+    assert hasattr(sys.modules[adapter.OMOL_MODULE_NAME], "OMolDataset")
+
+
+def test_adapter_diagnostics_record_applied_shims(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import chemfluor.conforformer.adapter as adapter
+
+    _clean_compat_modules()
+    root = _compat_root(tmp_path)
+
+    def import_for_successful_upstream(name: str):
+        if name == adapter.HMDB_MODULE_NAME:
+            raise ModuleNotFoundError("missing HugeMDB", name=name)
+        if name == adapter.OMOL_MODULE_NAME:
+            raise ModuleNotFoundError("missing fairchem", name="fairchem")
+        return _module(name)
+
+    monkeypatch.setattr(adapter.importlib, "import_module", import_for_successful_upstream)
+    diagnostics = adapter.ensure_upstream_import_compatibility(root)
+    assert diagnostics.hmdb_shim_applied
+    assert diagnostics.omol_shim_applied
+    assert diagnostics.upstream_commit == adapter.AFFECTED_UPSTREAM_COMMIT
+    assert diagnostics.upstream_import_succeeded
+
+
+def test_ordinary_conforformer_import_does_not_require_unicore(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_find_spec = importlib.util.find_spec
+
+    def find_spec_without_unicore(name: str, *args: object, **kwargs: object):
+        if name == "unicore":
+            return None
+        return real_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", find_spec_without_unicore)
+    module = importlib.import_module("chemfluor.conforformer")
+    assert hasattr(module, "ConforFormerEncoderAdapter")
+
+
+def test_env_report_includes_upstream_import_and_shim_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    import scripts.smoke_conforformer_encoder as smoke
+    from chemfluor.conforformer.adapter import UpstreamImportCompatibilityDiagnostics
+
+    diagnostics = UpstreamImportCompatibilityDiagnostics(
+        hmdb_shim_applied=True,
+        hmdb_reason="missing upstream source file",
+        omol_shim_applied=True,
+        omol_reason="fairchem missing",
+        upstream_commit="test-commit",
+        upstream_import_succeeded=True,
+    )
+    monkeypatch.setattr(smoke, "ensure_upstream_import_compatibility", lambda root: diagnostics)
+    report = smoke._environment_report(smoke._parser().parse_args(["--env-report"]))
+    assert report["upstream_import_status"] == {"available": True}
+    assert report["applied_compatibility_shims"]["hmdb_shim_applied"] is True
+    assert report["applied_compatibility_shims"]["omol_shim_applied"] is True

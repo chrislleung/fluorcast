@@ -21,6 +21,7 @@ from chemfluor.conforformer.adapter import (
     AssetUnavailableError,
     ConforFormerEncoderAdapter,
     dependency_report,
+    ensure_upstream_import_compatibility,
     inspect_assets,
 )
 from chemfluor.conforformer.cache import CacheError, load_conformer_cache_record
@@ -89,16 +90,20 @@ def _environment_report(args: argparse.Namespace) -> dict[str, Any]:
 
         cuda_available = bool(torch.cuda.is_available())
     upstream_status: dict[str, Any]
+    compatibility_shims: dict[str, Any]
     upstream_path = ROOT / "third_party" / "ConforFormer" / "unimol"
     inserted = False
     if str(upstream_path) not in sys.path:
         sys.path.insert(0, str(upstream_path))
         inserted = True
     try:
-        importlib.import_module("unimol.tasks.unimol_contrast")
-        importlib.import_module("unimol.models.unimol_contrast")
-        upstream_status = {"available": True}
+        diagnostics = ensure_upstream_import_compatibility(ROOT)
+        compatibility_shims = asdict(diagnostics)
+        upstream_status = {"available": diagnostics.upstream_import_succeeded}
+        if not diagnostics.upstream_import_succeeded:
+            upstream_status["error"] = "upstream import failed after compatibility shim registration"
     except Exception as exc:
+        compatibility_shims = {"error": f"{type(exc).__name__}: {exc}"}
         upstream_status = {"available": False, "error": f"{type(exc).__name__}: {exc}"}
     finally:
         if inserted:
@@ -122,6 +127,8 @@ def _environment_report(args: argparse.Namespace) -> dict[str, Any]:
         "unicore": _import_status("unicore"),
         "upstream_commit": commit_path.read_text(encoding="utf-8").strip() if commit_path.exists() else "unknown",
         "upstream_conforformer": upstream_status,
+        "upstream_import_status": upstream_status,
+        "applied_compatibility_shims": compatibility_shims,
     }
 
 

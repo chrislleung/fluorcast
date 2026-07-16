@@ -15,6 +15,7 @@ import inspect
 from pathlib import Path
 import platform
 import sys
+from types import ModuleType
 from types import SimpleNamespace
 from typing import Any
 
@@ -36,6 +37,10 @@ AUDITED_ARCHITECTURE: dict[str, Any] = {
     "mode": "infer",
 }
 UPSTREAM_RELATIVE_PATH = Path("third_party") / "ConforFormer" / "unimol"
+AFFECTED_UPSTREAM_COMMIT = "f3095c5ea0218b6b4b2780cd1f43122410e80a7a"
+HMDB_MODULE_NAME = "unimol.data.HugeMDB_dataset"
+OMOL_MODULE_NAME = "unimol.data.OMol_dataset"
+_COMPAT_PLACEHOLDER_ATTR = "__fluorcast_conforformer_compat_placeholder__"
 
 
 class AdapterError(RuntimeError):
@@ -76,6 +81,16 @@ class DependencyReport:
     lmdb_available: bool
     native_windows: bool
     warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class UpstreamImportCompatibilityDiagnostics:
+    hmdb_shim_applied: bool
+    hmdb_reason: str
+    omol_shim_applied: bool
+    omol_reason: str
+    upstream_commit: str
+    upstream_import_succeeded: bool
 
 
 @dataclass(frozen=True)
@@ -485,6 +500,102 @@ def _read_upstream_commit(root: Path) -> str:
     return "unknown"
 
 
+def _upstream_data_file(root: Path, file_name: str) -> Path:
+    return root / UPSTREAM_RELATIVE_PATH / "unimol" / "data" / file_name
+
+
+def _is_own_placeholder(module_name: str) -> bool:
+    module = sys.modules.get(module_name)
+    return bool(module is not None and getattr(module, _COMPAT_PLACEHOLDER_ATTR, False))
+
+
+def _placeholder_dataset_class(class_name: str, message: str) -> type:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        raise RuntimeError(message)
+
+    return type(class_name, (), {"__init__": __init__, "__module__": __name__})
+
+
+def _register_dataset_placeholder(module_name: str, class_name: str, message: str) -> None:
+    existing = sys.modules.get(module_name)
+    if existing is not None and getattr(existing, _COMPAT_PLACEHOLDER_ATTR, False):
+        return
+    module = ModuleType(module_name)
+    setattr(module, class_name, _placeholder_dataset_class(class_name, message))
+    setattr(module, _COMPAT_PLACEHOLDER_ATTR, True)
+    sys.modules[module_name] = module
+
+
+def _import_real_or_raise(module_name: str) -> ModuleType:
+    if _is_own_placeholder(module_name):
+        del sys.modules[module_name]
+    return importlib.import_module(module_name)
+
+
+def _ensure_hmdb_import_compatibility(root: Path, upstream_commit: str) -> tuple[bool, str]:
+    source_path = _upstream_data_file(root, "HugeMDB_dataset.py")
+    if upstream_commit != AFFECTED_UPSTREAM_COMMIT:
+        return False, f"pinned commit {upstream_commit} is not the documented affected commit"
+    if source_path.exists():
+        _import_real_or_raise(HMDB_MODULE_NAME)
+        return False, f"real source file exists at {source_path}"
+    try:
+        _import_real_or_raise(HMDB_MODULE_NAME)
+    except ModuleNotFoundError as exc:
+        if exc.name != HMDB_MODULE_NAME:
+            raise
+    else:
+        return False, "real module imported successfully"
+    _register_dataset_placeholder(
+        HMDB_MODULE_NAME,
+        "HMDBDataset",
+        "unimol.data.HugeMDB_dataset.HMDBDataset is unavailable because the pinned "
+        "ConforFormer source is missing unimol/data/HugeMDB_dataset.py. This dataset "
+        "is not supported or needed by the direct FluorCast contrast-encoder pathway.",
+    )
+    return True, f"missing upstream source file: {source_path}"
+
+
+def _ensure_omol_import_compatibility() -> tuple[bool, str]:
+    try:
+        _import_real_or_raise(OMOL_MODULE_NAME)
+    except ModuleNotFoundError as exc:
+        if exc.name != "fairchem":
+            raise
+    else:
+        return False, "real module imported successfully"
+    _register_dataset_placeholder(
+        OMOL_MODULE_NAME,
+        "OMolDataset",
+        "unimol.data.OMol_dataset.OMolDataset could not be imported because fairchem "
+        "is not installed. This dataset is not supported or needed by the direct "
+        "FluorCast contrast-encoder pathway.",
+    )
+    return True, "real OMol_dataset import failed because fairchem is not installed"
+
+
+def ensure_upstream_import_compatibility(root: Path | str) -> UpstreamImportCompatibilityDiagnostics:
+    root = Path(root)
+    upstream_commit = _read_upstream_commit(root)
+    hmdb_applied, hmdb_reason = _ensure_hmdb_import_compatibility(root, upstream_commit)
+    omol_applied, omol_reason = _ensure_omol_import_compatibility()
+    upstream_import_succeeded = False
+    try:
+        importlib.import_module("unimol.tasks.unimol_contrast")
+        importlib.import_module("unimol.models.unimol_contrast")
+    except Exception:
+        upstream_import_succeeded = False
+    else:
+        upstream_import_succeeded = True
+    return UpstreamImportCompatibilityDiagnostics(
+        hmdb_shim_applied=hmdb_applied,
+        hmdb_reason=hmdb_reason,
+        omol_shim_applied=omol_applied,
+        omol_reason=omol_reason,
+        upstream_commit=upstream_commit,
+        upstream_import_succeeded=upstream_import_succeeded,
+    )
+
 def _ensure_upstream_imports(root: Path) -> None:
     upstream_path = root / UPSTREAM_RELATIVE_PATH
     if not upstream_path.exists():
@@ -498,6 +609,7 @@ def _ensure_upstream_imports(root: Path) -> None:
             "Uni-Core is required to construct the upstream ConforFormer model.",
             detail=type(exc).__name__,
         ) from exc
+    ensure_upstream_import_compatibility(root)
     try:
         importlib.import_module("unimol.tasks.unimol_contrast")
         importlib.import_module("unimol.models.unimol_contrast")
