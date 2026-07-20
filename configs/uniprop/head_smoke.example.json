@@ -1,0 +1,23 @@
+{
+  "schema_version": "fluorcast_uniprop_head_smoke_v1",
+  "data_dir": "data/processed/uniprop/lmdb",
+  "output_dir": "outputs/uniprop_head_smoke",
+  "targets": [
+    "absorption_nm",
+    "emission_nm",
+    "quantum_yield"
+  ],
+  "seed": 42,
+  "subset_size": 24,
+  "train_batch_size": 8,
+  "valid_batch_size": 32,
+  "max_updates": 20,
+  "learning_rate": 0.001,
+  "weight_decay": 0.0,
+  "hidden_dim": 32,
+  "molecule_feature_dim": 32,
+  "solvent_feature_dim": 24,
+  "solvent_adapter_dim": 16,
+  "validation_partition": "valid",
+  "device": "auto"
+}

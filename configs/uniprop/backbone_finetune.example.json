@@ -1,0 +1,32 @@
+{
+  "schema_version": "fluorcast_uniprop_backbone_finetune_v1",
+  "data_dir": "data/processed/uniprop/lmdb",
+  "output_dir": "outputs/uniprop_backbone_finetune",
+  "head_checkpoint": "outputs/uniprop_head_smoke/best_checkpoint.pt",
+  "targets": [
+    "absorption_nm",
+    "emission_nm",
+    "quantum_yield"
+  ],
+  "seed": 42,
+  "subset_size": 24,
+  "train_batch_size": 8,
+  "micro_batch_size": 4,
+  "gradient_accumulation_steps": 2,
+  "valid_batch_size": 32,
+  "max_updates": 20,
+  "backbone_learning_rate": 0.0001,
+  "head_learning_rate": 0.001,
+  "weight_decay": 0.0,
+  "max_grad_norm": 1.0,
+  "early_stopping_patience": 5,
+  "hidden_dim": 32,
+  "molecule_feature_dim": 32,
+  "solvent_feature_dim": 24,
+  "solvent_adapter_dim": 16,
+  "validation_partition": "valid",
+  "device": "auto",
+  "use_amp": true,
+  "use_ema": false,
+  "ema_decay": 0.99
+}

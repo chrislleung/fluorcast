@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "record": "https://zenodo.org/records/18061300",
+  "checkpoint_dir_env": "FLUORCAST_UNIPROP_CHECKPOINT_DIR",
+  "default_checkpoint_dir": "assets/uniprop/checkpoints",
+  "checksum_type": "md5",
+  "checkpoints": [
+    {
+      "filename": "uniprop_rdkit_to_dft_implicit.pt",
+      "expected_size_bytes": 459500000,
+      "source": "https://zenodo.org/records/18061300/files/uniprop_rdkit_to_dft_implicit.pt",
+      "checksum_type": "md5",
+      "checksum": "c87305171142e1c0898a0e2b67a7236a"
+    },
+    {
+      "filename": "uniprop_rdkit_to_xtb.pt",
+      "expected_size_bytes": 459500000,
+      "source": "https://zenodo.org/records/18061300/files/uniprop_rdkit_to_xtb.pt",
+      "checksum_type": "md5",
+      "checksum": "7be9b8858e70a85718429cd17dd0670b"
+    },
+    {
+      "filename": "uniprop_xtb_to_dft_implicit.pt",
+      "expected_size_bytes": 459500000,
+      "source": "https://zenodo.org/records/18061300/files/uniprop_xtb_to_dft_implicit.pt",
+      "checksum_type": "md5",
+      "checksum": "b9768e7b4f69b4d54b5d436b7403e883"
+    },
+    {
+      "filename": "uniprop_xtb_to_dft_vacuum.pt",
+      "expected_size_bytes": 459500000,
+      "source": "https://zenodo.org/records/18061300/files/uniprop_xtb_to_dft_vacuum.pt",
+      "checksum_type": "md5",
+      "checksum": "369b98e9bc9915396822c8274bf89d2f"
+    }
+  ]
+}

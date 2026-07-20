@@ -14,6 +14,7 @@ htmlcov/
 # Virtual environments
 # =========================
 .venv/
+.venv-uniprop/
 venv/
 env/
 chemfluor_env/
@@ -45,6 +46,9 @@ slurm-*.out
 # =========================
 # Trained models can be large and should not be committed.
 *.joblib
+*.pt
+*.ckpt
+*.lmdb
 *.pkl
 *.pickle
 catboost_info/
@@ -109,3 +113,13 @@ outputs/candidate_screening/
 paper_comparison_full_20260625_0920.tar.gz
 hybrid predictions/
 final_hybrid_stokes_results.tar.gz
+
+# =========================
+# UniProp / nablaColors local assets
+# =========================
+third_party/nablacolors/
+assets/uniprop/
+assets/nablacolors/
+outputs/uniprop*/
+models/uniprop*/
+data/processed/uniprop/

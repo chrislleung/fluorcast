@@ -1,1 +1,0 @@
-"""Reproducible manuscript comparison experiments."""

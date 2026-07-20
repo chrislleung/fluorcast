@@ -10,3 +10,4 @@ catboost
 ipykernel
 jupyterlab
 pytest
+lmdb

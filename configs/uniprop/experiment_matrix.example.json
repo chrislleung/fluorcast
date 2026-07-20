@@ -1,0 +1,47 @@
+{
+  "schema_version": "fluorcast_uniprop_experiment_matrix_v1",
+  "row_manifest": "data/processed/uniprop/row_manifest.csv",
+  "molecule_manifest": "data/processed/uniprop/molecule_manifest.csv",
+  "split_assignments": "data/processed/uniprop/split_assignments.csv",
+  "out_dir": "outputs/uniprop_experiment_matrix",
+  "split_families": [
+    "random",
+    "molecule",
+    "scaffold",
+    "solvent",
+    "double_cold_start"
+  ],
+  "model_variants": [
+    "morgan_rdkit_baseline",
+    "tree_ensemble_baseline",
+    "uniprop_solvent_descriptors",
+    "uniprop_chemprop_solvent_encoder",
+    "uniprop_frozen_backbone",
+    "uniprop_finetuned",
+    "uniprop_independent_heads",
+    "uniprop_wavelength_constrained_heads",
+    "uniprop_rate_constrained_heads",
+    "uniprop_complete_physics_constrained",
+    "rdkit_mmff_single",
+    "xtb_single",
+    "rdkit_multi_conformer",
+    "rdkit_multi_equal_pooling",
+    "rdkit_multi_energy_weighted_pooling",
+    "rdkit_multi_solvent_conditioned_pooling"
+  ],
+  "targets": [
+    "absorption_nm",
+    "emission_nm",
+    "quantum_yield",
+    "lifetime_ns",
+    "log_extinction"
+  ],
+  "seeds": [
+    11,
+    17,
+    23
+  ],
+  "max_rows_per_partition": null,
+  "bootstrap_samples": 1000,
+  "qy_threshold": 0.25
+}

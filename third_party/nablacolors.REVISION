@@ -1,0 +1,5 @@
+# Pinned upstream revision for the isolated UniProp/nablaColors environment.
+# Keep this file tracked; keep third_party/nablacolors/ ignored.
+repo=https://github.com/AI4DD/nablaColors.git
+ref=v1.0.0
+commit=39095389c0a4ecb47872ef74d00b8d13597939c8
