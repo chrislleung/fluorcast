@@ -815,3 +815,91 @@ Remaining limitations:
 - xTB optimization itself is not invoked locally; only optional dependency
   detection and schema readiness are implemented.
 - The original one-RDKit-geometry model remains the reproducible baseline.
+
+## 2026-07-20 - Stage 12 UniProp Stage-Gate Audit
+
+Scope:
+
+- Audited the existing UniProp implementation on `feature/uniprop-3d` without
+  adding new features or changing runtime behavior.
+- Inspected the handoff context, every module under `src/chemfluor/uniprop`,
+  UniProp scripts, configs, Slurm wrappers, tests, dependency docs, asset docs,
+  and implementation log.
+- Added `docs/UNIPROP_STAGE_GATE_REPORT.md` with the required component table
+  and explicit real-versus-simulated determinations.
+
+Repository state before edits:
+
+- Branch: `feature/uniprop-3d`.
+- Latest commit: `322e1c3 feat: add validated UniProp 3D integration scaffold`.
+- Pre-existing untracked paths included `artifacts/`,
+  `development md/UniProp Handoff/`, and the active-file scratch path whose
+  name begins with `owords`.
+
+Gate commands:
+
+- `python -m pytest -q`: 323 passed, 1 skipped, 4 warnings in 91.83s.
+- `python -m compileall -q src scripts`: passed.
+- `git diff --check`: passed.
+
+Verified current state:
+
+- nablaColors revision pinning is real. `third_party/nablacolors.REVISION`
+  pins `https://github.com/AI4DD/nablaColors.git` at
+  `39095389c0a4ecb47872ef74d00b8d13597939c8`.
+- The ignored local `third_party/nablacolors/` checkout is present and clean at
+  the pinned commit when inspected with a one-off `safe.directory` Git flag.
+- The local audit environment is Python 3.14.0 with RDKit 2026.03.2, LMDB
+  2.3.0, PyTorch 2.10.0 CPU-only, no CUDA, no Uni-Core, no Uni-Mol+, no
+  Chemprop, and no staged UniProp checkpoints.
+- Manifests, split auditing, RDKit geometry cache, LMDB export/validation,
+  target-mask wrapper, physics equations, conformer-cache prep, and
+  production JSON/bundle contracts are real local FluorCast code.
+- Head-only training, backbone fine-tuning, UniProp matrix variants, Chemprop
+  solvent-encoder variant, and production fixture inference are dummy or
+  lightweight local stand-ins and must not be treated as proof that upstream
+  UniProp works.
+- The pinned upstream `LMDBDataset` source-file smoke is partial upstream
+  validation only; full Uni-Core/Uni-Mol+ package/task loading remains
+  unverified.
+
+Dependency and Git hygiene:
+
+- `requirements.txt` keeps heavy UniProp dependencies out of the base
+  environment. It includes `lmdb`, but not Uni-Core, Uni-Mol+, Chemprop,
+  PyTorch, checkpoints, or nablaColors source.
+- `.gitignore` excludes the downloaded nablaColors checkout, UniProp assets,
+  checkpoints, LMDBs, generated UniProp data, output directories, model
+  directories, Python caches, and virtual environments.
+- `compileall` produced ignored `__pycache__/` files under
+  `src/chemfluor/uniprop/`; these remain ignored and untracked.
+- No UniProp scripts/configs contain credentials or tokens. UniProp tracked
+  files do not hard-code a Windows username path.
+- UniProp Slurm wrappers use configurable `$HOME/scratch/...` defaults.
+  `run_uniprop_head_smoke.sbatch` currently hard-codes an H100 GPU request by
+  default; fine-tuning requests a generic single GPU.
+
+Components requiring Python 3.10:
+
+- Non-dry-run `scripts/bootstrap_uniprop.sh`.
+- Uni-Core import and `unicore-train`.
+- Uni-Mol+ import and upstream task/loader validation.
+- Chemprop v1.3 solvent-encoder validation.
+- Real pretrained UniProp checkpoint loading and upstream training/validation
+  entry points.
+
+Components requiring Nibi or CUDA:
+
+- Real GPU head-only upstream UniProp training.
+- Real backbone fine-tuning.
+- Practical full-matrix execution with trained artifacts.
+- The current head-smoke Slurm default requests an H100; the fine-tune wrapper
+  requests one generic CUDA GPU.
+
+Single next stage:
+
+- Python 3.10 upstream environment validation and checkpoint staging. Run the
+  isolated bootstrap/audit, stage Zenodo checkpoints outside Git, verify
+  Uni-Core/Uni-Mol+/Chemprop imports, and run a tiny upstream loader/task
+  smoke. Do not generate the full FluorCast geometry cache or start model
+  training in that stage.
