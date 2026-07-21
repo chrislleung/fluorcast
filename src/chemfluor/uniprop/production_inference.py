@@ -31,6 +31,8 @@ BUNDLE_SCHEMA_VERSION = "fluorcast_uniprop_model_bundle_v1"
 PREDICTION_SCHEMA_VERSION = "fluorcast_uniprop_prediction_v1"
 BACKEND_ADAPTER_SCHEMA_VERSION = "fluorcast_backend_prediction_adapter_v1"
 SUPPORTED_BUNDLE_SCHEMAS = {BUNDLE_SCHEMA_VERSION}
+TINY_3D_SMOKE_MODEL_KIND = "tiny_3d_smoke_backbone"
+FORBIDDEN_PRODUCTION_MODEL_KINDS = {TINY_3D_SMOKE_MODEL_KIND}
 
 
 class BundleError(Exception):
@@ -117,6 +119,12 @@ def load_bundle(bundle_dir: Path, *, device: str = "cpu") -> ProductionBundle:
     metadata = _read_json(bundle_dir / "metadata.json")
     if metadata.get("schema_version") not in SUPPORTED_BUNDLE_SCHEMAS:
         raise BundleError(f"Unsupported model bundle schema: {metadata.get('schema_version')}")
+    if (
+        metadata.get("model_kind") in FORBIDDEN_PRODUCTION_MODEL_KINDS
+        or metadata.get("profile") == "windows-smoke"
+        or metadata.get("real_uniprop_used") is False
+    ):
+        raise BundleError("Windows smoke artifacts cannot be loaded as a real production UniProp bundle.")
     if metadata.get("physics_schema_version") != PHYSICS_SCHEMA_VERSION:
         raise BundleError(f"Model physics schema mismatch: {metadata.get('physics_schema_version')}")
     if metadata.get("supported_geometry_schema") != GEOMETRY_SCHEMA_VERSION:
@@ -153,7 +161,11 @@ def load_bundle(bundle_dir: Path, *, device: str = "cpu") -> ProductionBundle:
     ).to(requested_device)
     try:
         state = torch.load(bundle_dir / asset_names["model_weights"], map_location=requested_device, weights_only=False)
+        if isinstance(state, dict) and state.get("model_kind") in FORBIDDEN_PRODUCTION_MODEL_KINDS:
+            raise BundleError("Tiny smoke checkpoint cannot be loaded in real UniProp model mode.")
         model.load_state_dict(state["model_state_dict"] if isinstance(state, dict) and "model_state_dict" in state else state)
+    except BundleError:
+        raise
     except Exception as exc:
         raise BundleError("Could not load model weights from bundle.") from exc
     model.eval()

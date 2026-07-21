@@ -12,6 +12,7 @@ import importlib
 import importlib.util
 import json
 import os
+import platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -20,9 +21,14 @@ from typing import Any
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SRC_PATH = PROJECT_ROOT / "src"
+if str(SRC_PATH) not in sys.path:
+    sys.path.insert(0, str(SRC_PATH))
 DEFAULT_REVISION_FILE = PROJECT_ROOT / "third_party" / "nablacolors.REVISION"
 DEFAULT_UPSTREAM_DIR = PROJECT_ROOT / "third_party" / "nablacolors"
 DEFAULT_MANIFEST = PROJECT_ROOT / "configs" / "uniprop" / "checkpoint_manifest.json"
+WINDOWS_SMOKE_PROFILE = "windows-smoke"
+NIBI_REAL_PROFILE = "nibi-real"
 
 
 def read_revision_file(path: Path) -> dict[str, str]:
@@ -80,9 +86,14 @@ def torch_report() -> dict[str, Any]:
         torch = importlib.import_module("torch")
         cuda_available = bool(torch.cuda.is_available())
         gpu_name = torch.cuda.get_device_name(0) if cuda_available else None
+        try:
+            cpu_usable = bool(torch.isfinite(torch.ones(1, device="cpu")).all().item())
+        except Exception:
+            cpu_usable = False
         return {
             "available": True,
             "version": getattr(torch, "__version__", None),
+            "cpu_usable": cpu_usable,
             "cuda_available": cuda_available,
             "cuda_runtime": getattr(torch.version, "cuda", None),
             "gpu_name": gpu_name,
@@ -92,11 +103,29 @@ def torch_report() -> dict[str, Any]:
         return {
             "available": False,
             "version": None,
+            "cpu_usable": False,
             "cuda_available": False,
             "cuda_runtime": None,
             "gpu_name": None,
             "error": f"{type(exc).__name__}: {exc}",
         }
+
+
+def repository_import_report() -> dict[str, Any]:
+    modules = [
+        "chemfluor.uniprop.manifests",
+        "chemfluor.uniprop.geometry_cache",
+        "chemfluor.uniprop.lmdb_export",
+        "chemfluor.uniprop.windows_smoke",
+    ]
+    rows = {}
+    for module_name in modules:
+        try:
+            importlib.import_module(module_name)
+            rows[module_name] = {"available": True, "error": None}
+        except Exception as exc:
+            rows[module_name] = {"available": False, "error": f"{type(exc).__name__}: {exc}"}
+    return {"available": all(row["available"] for row in rows.values()), "modules": rows}
 
 
 def git_revision(path: Path) -> dict[str, Any]:
@@ -174,36 +203,102 @@ def checkpoint_report(manifest_path: Path, checkpoint_dir: Path, *, dry_run: boo
 
 
 def readiness(report: dict[str, Any]) -> dict[str, Any]:
-    python_ok = report["python"]["version_info"][:2] == [3, 10]
+    python_3_10 = report["python"]["version_info"][:2] == [3, 10]
+    python_3_11_plus = (
+        report["python"]["version_info"][0] == 3
+        and report["python"]["version_info"][1] >= 11
+    )
+    windows_platform = report["platform"]["system"] == "Windows"
+    linux_platform = report["platform"]["system"] == "Linux"
     upstream_ok = (
         report["upstream"]["present"]
         and report["upstream"]["commit"] == report["revision"].get("commit")
     )
-    preprocessing = python_ok and report["rdkit"]["available"] and report["lmdb"]["available"] and upstream_ok
-    cpu_smoke = (
-        preprocessing
+    windows_smoke = (
+        windows_platform
+        and python_3_11_plus
+        and report["rdkit"]["available"]
+        and report["lmdb"]["available"]
         and report["pytorch"]["available"]
+        and report["pytorch"]["cpu_usable"]
+        and report["numpy"]["available"]
+        and report["pandas"]["available"]
+        and report["repository_imports"]["available"]
+    )
+    real_base = (
+        linux_platform
+        and python_3_10
+        and report["rdkit"]["available"]
+        and report["lmdb"]["available"]
+        and report["pytorch"]["available"]
+        and report["pytorch"]["cpu_usable"]
         and report["unicore"]["available"]
         and report["unimol_plus"]["available"]
+        and upstream_ok
         and report["checkpoints"]["all_present"]
         and report["checkpoints"]["all_hashes_match"]
     )
-    gpu_training = cpu_smoke and report["pytorch"]["cuda_available"] and bool(report["pytorch"]["gpu_name"])
+    real_gpu = real_base and report["pytorch"]["cuda_available"] and bool(report["pytorch"]["gpu_name"])
+    preprocessing = (
+        report["rdkit"]["available"]
+        and report["lmdb"]["available"]
+        and report["repository_imports"]["available"]
+    )
+    cpu_smoke = windows_smoke if report["profile"] == WINDOWS_SMOKE_PROFILE else real_base
+    gpu_training = real_gpu
     return {
+        "profile": report["profile"],
+        "selected_profile_ready": bool(
+            windows_smoke
+            if report["profile"] == WINDOWS_SMOKE_PROFILE
+            else (
+                real_base
+                if report["real_device"] == "cpu"
+                else real_gpu
+                if report["real_device"] == "gpu"
+                else real_base and real_gpu
+            )
+        ),
+        "windows_smoke_ready": bool(windows_smoke),
+        "real_uniprop_cpu_ready": bool(real_base),
+        "real_uniprop_gpu_ready": bool(real_gpu),
         "preprocessing_ready": bool(preprocessing),
         "cpu_smoke_ready": bool(cpu_smoke),
         "gpu_training_ready": bool(gpu_training),
         "reasons": {
-            "python_3_10": python_ok,
+            "python_3_10": python_3_10,
+            "python_3_11_plus": python_3_11_plus,
+            "windows_platform": windows_platform,
+            "linux_platform": linux_platform,
             "rdkit_available": report["rdkit"]["available"],
             "lmdb_available": report["lmdb"]["available"],
             "upstream_revision_matches": bool(upstream_ok),
             "pytorch_available": report["pytorch"]["available"],
+            "pytorch_cpu_usable": report["pytorch"]["cpu_usable"],
+            "numpy_available": report["numpy"]["available"],
+            "pandas_available": report["pandas"]["available"],
+            "repository_imports_available": report["repository_imports"]["available"],
             "unicore_available": report["unicore"]["available"],
             "unimol_plus_available": report["unimol_plus"]["available"],
             "checkpoints_present": report["checkpoints"]["all_present"],
             "checkpoint_hashes_match": report["checkpoints"]["all_hashes_match"],
             "cuda_available": report["pytorch"]["cuda_available"],
+        },
+        "profile_requirements": {
+            "windows_smoke": {
+                "requires_cuda": False,
+                "requires_unicore": False,
+                "requires_unimol_plus": False,
+                "requires_chemprop": False,
+                "requires_real_checkpoint": False,
+            },
+            "nibi_real": {
+                "requires_cuda": report["real_device"] in {"gpu", "both"},
+                "requires_unicore": True,
+                "requires_unimol_plus": True,
+                "requires_chemprop": False,
+                "requires_real_checkpoint": True,
+            },
         },
     }
 
@@ -218,14 +313,22 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
 
     report: dict[str, Any] = {
         "schema_version": 1,
+        "profile": args.profile,
+        "real_device": args.real_device,
         "python": {
             "executable": sys.executable,
             "version": sys.version.split()[0],
             "version_info": [sys.version_info.major, sys.version_info.minor, sys.version_info.micro],
         },
+        "platform": {
+            "system": platform.system(),
+            "platform": platform.platform(),
+        },
         "pytorch": torch_report(),
         "rdkit": rdkit_report(),
         "lmdb": module_report("lmdb"),
+        "numpy": module_report("numpy"),
+        "pandas": module_report("pandas"),
         "unicore": {
             **module_report("unicore"),
             "unicore_train": shutil.which("unicore-train"),
@@ -233,6 +336,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "unimol_plus": module_report("unimol_plus"),
         "unimol": module_report("unimol"),
         "chemprop": module_report("chemprop"),
+        "repository_imports": repository_import_report(),
         "revision": revision,
         "upstream": git_revision(args.upstream_dir),
         "checkpoints": checkpoint_report(args.manifest, checkpoint_dir, dry_run=args.dry_run),
@@ -243,6 +347,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--profile", choices=[WINDOWS_SMOKE_PROFILE, NIBI_REAL_PROFILE], default=NIBI_REAL_PROFILE)
+    parser.add_argument("--real-device", choices=["cpu", "gpu", "both"], default="cpu")
     parser.add_argument("--revision-file", type=Path, default=DEFAULT_REVISION_FILE)
     parser.add_argument("--upstream-dir", type=Path, default=DEFAULT_UPSTREAM_DIR)
     parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)

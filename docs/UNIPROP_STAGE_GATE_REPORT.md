@@ -15,10 +15,65 @@ Latest commit before edits: `322e1c3 feat: add validated UniProp 3D integration 
 
 The local audit environment is Python `3.14.0`, RDKit `2026.03.2`, LMDB `2.3.0`, PyTorch `2.10.0+cpu`, no CUDA, no Uni-Core, no Uni-Mol+, no Chemprop, and no staged UniProp checkpoints. The ignored `third_party/nablacolors` checkout is present and clean at the pinned commit when read with a one-off `safe.directory` flag.
 
+## 2026-07-21 Windows-Smoke Addendum
+
+Added a separate native-Windows profile named `windows-smoke` and preserved the
+real Linux/Nibi profile as `nibi-real`.
+
+The Windows profile is an integration smoke test, not proof that pretrained
+UniProp works. It uses RDKit, LMDB, NumPy, pandas, and CPU PyTorch with
+`Tiny3DSmokeBackbone`, a small FluorCast-owned model that consumes the same
+atom, coordinate, graph, solvent, and mask tensor families as the UniProp data
+adapter. It writes checkpoints and predictions with
+`model_kind: "tiny_3d_smoke_backbone"`, `real_uniprop_used: false`, and
+`real_checkpoint_loaded: false`.
+
+The environment audit now reports:
+
+- `windows_smoke_ready`
+- `real_uniprop_cpu_ready`
+- `real_uniprop_gpu_ready`
+
+On this Windows machine, `scripts/audit_uniprop_environment.py --profile
+windows-smoke --dry-run` reports `windows_smoke_ready: true`. The same audit
+with `--profile nibi-real --real-device cpu --dry-run` reports
+`real_uniprop_cpu_ready: false`, as expected, because this environment lacks
+Linux, Python 3.10, Uni-Core, Uni-Mol+, and real checkpoints.
+
+The complete smoke command is:
+
+```powershell
+python scripts\run_uniprop_windows_smoke.py `
+  --output-dir outputs\uniprop_windows_smoke `
+  --seed 123 `
+  --overwrite `
+  --json-summary
+```
+
+Windows verified components:
+
+- fixture manifests with repeated chromophores, multiple solvents, measured
+  labels, and deliberate missing labels;
+- one deterministic RDKit geometry per unique chromophore;
+- geometry reuse across repeated chromophore rows;
+- LMDB validation and adapter loading;
+- target-mask collation and masked multitask loss;
+- finite forward and backward PyTorch execution through the tiny 3D backbone,
+  solvent encoder, and heads;
+- optimizer parameter changes;
+- checkpoint save/load identity and deterministic one-step resume;
+- versioned smoke prediction JSON;
+- production-loader refusal for smoke bundles and tiny checkpoints.
+
+Nibi-only unverified components remain Uni-Core, Uni-Mol+, real checkpoint
+loading, real UniProp forward/backward execution, CUDA scheduling, full
+geometry-cache generation, and full training.
+
 ## Component Status Table
 
 | Component | Implementation status | Real upstream dependency used | Mocked or fallback behavior | Tests currently proving it | Tests still missing | External assets required | Next validation command |
 | --- | --- | --- | --- | --- | --- | --- | --- |
+| Windows smoke profile | Real local integration smoke for FluorCast data/checkpoint/JSON contracts; not a real UniProp model | RDKit, LMDB, NumPy, pandas, CPU PyTorch | Uses `Tiny3DSmokeBackbone`; no Uni-Core, Uni-Mol+, Chemprop, CUDA, or real checkpoint | `tests/test_uniprop_environment_profiles.py`, `tests/test_uniprop_windows_smoke.py` | None for local smoke; real model validation remains Nibi-only | Windows Python 3.11 or newer with local deps | `python scripts/run_uniprop_windows_smoke.py --output-dir outputs/uniprop_windows_smoke --seed 123 --overwrite --json-summary` |
 | Upstream nablaColors pin/bootstrap | Real bootstrap/audit scripts; non-dry-run install not executed locally | Pinned repo/ref/commit in `third_party/nablacolors.REVISION`; local ignored clone at `39095389c0a4ecb47872ef74d00b8d13597939c8` | Audit cannot verify clone without `safe.directory` under sandbox user; bootstrap dry-run only | `tests/test_uniprop_bootstrap_environment.py`; dry-run, shell syntax, revision mismatch, manifest schema | Real Python 3.10 bootstrap on WSL/Nibi; editable install validation | Python 3.10, Git, nablaColors clone, optional CUDA stack | `bash scripts/bootstrap_uniprop.sh --mode cpu --python python3.10` |
 | Uni-Core import | Not implemented in FluorCast runtime; only audited | None locally; audit checks `unicore` and `unicore-train` | Missing dependency reported as readiness failure | `tests/test_uniprop_bootstrap_environment.py` JSON schema only | Import smoke in installed Python 3.10 env; `unicore-train` CLI smoke | `.venv-uniprop`, upstream `Uni-Core/` | `.venv-uniprop/bin/python scripts/audit_uniprop_environment.py` |
 | Uni-Mol+ import | Not implemented in FluorCast runtime; only audited | None locally; audit checks `unimol_plus` | Missing dependency reported as readiness failure | `tests/test_uniprop_bootstrap_environment.py` JSON schema only | Import and upstream task construction in installed Python 3.10 env | `.venv-uniprop`, upstream `unimol_plus/` | `.venv-uniprop/bin/python -c "import unimol_plus"` |

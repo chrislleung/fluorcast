@@ -903,3 +903,80 @@ Single next stage:
   Uni-Core/Uni-Mol+/Chemprop imports, and run a tiny upstream loader/task
   smoke. Do not generate the full FluorCast geometry cache or start model
   training in that stage.
+
+## 2026-07-21 - Stage 13 Native Windows Smoke Profile
+
+Scope:
+
+- Added a separate `windows-smoke` profile for native Windows integration
+  testing.
+- Preserved `nibi-real` as the only profile that can claim real UniProp
+  dependency/checkpoint readiness.
+- No Uni-Core, Uni-Mol+, Chemprop, CUDA, Conda, WSL, or real checkpoint was
+  installed, patched, emulated, or downloaded.
+
+Files added or updated:
+
+- `src/chemfluor/uniprop/windows_smoke.py`
+- `scripts/run_uniprop_windows_smoke.py`
+- `scripts/audit_uniprop_environment.py`
+- `src/chemfluor/uniprop/production_inference.py`
+- `tests/test_uniprop_environment_profiles.py`
+- `tests/test_uniprop_windows_smoke.py`
+- `pytest.ini`
+- `docs/UNIPROP_DEPENDENCIES.md`
+- `docs/UNIPROP_STAGE_GATE_REPORT.md`
+- `docs/UNIPROP_WINDOWS_TO_NIBI_WORKFLOW.md`
+- `docs/UNIPROP_IMPLEMENTATION_LOG.md`
+
+Smoke behavior:
+
+- Builds a deterministic fixture with repeated chromophore rows in different
+  solvents, absorption labels, emission labels, quantum-yield labels, deliberate
+  missing labels, and extreme test labels.
+- Builds row and molecule manifests, deterministic split assignments, split
+  statistics, and train-only normalization outputs.
+- Generates one RDKit ETKDGv3/MMFF geometry per unique chromophore and proves
+  repeated chromophore rows reuse the same coordinate cache entry.
+- Writes and validates train/valid/test LMDBs, then loads the train LMDB
+  through `FluorCastUniPropSmokeDataset`.
+- Collates atom, coordinate, graph, solvent, atom-mask, edge-mask, and
+  target-mask tensors.
+- Runs `Tiny3DSmokeBackbone`, a solvent encoder, and multitask heads through a
+  finite forward pass, masked multitask loss, backward propagation, and an
+  optimizer step.
+- Saves a checkpoint with `model_kind: "tiny_3d_smoke_backbone"`, reloads it,
+  verifies prediction identity, resumes for one additional step, and proves an
+  exact deterministic resume against an uninterrupted two-step reference.
+- Writes a production-style smoke prediction JSON using schema
+  `fluorcast_uniprop_windows_smoke_prediction_v1`.
+- Writes a smoke bundle that production inference intentionally refuses.
+
+Environment audit behavior:
+
+- Added `--profile windows-smoke|nibi-real`.
+- Added `--real-device cpu|gpu|both` for real profile readiness selection.
+- Added readiness booleans `windows_smoke_ready`,
+  `real_uniprop_cpu_ready`, and `real_uniprop_gpu_ready`.
+- `windows-smoke` readiness gates only Windows, Python 3.11 or newer, RDKit,
+  LMDB, NumPy, pandas, CPU PyTorch, and repository imports.
+- `nibi-real` readiness still gates Linux, Python 3.10, PyTorch, LMDB, RDKit,
+  Uni-Core, Uni-Mol+, pinned upstream revision, real checkpoint presence and
+  hashes, and CUDA only for GPU readiness.
+
+Production guardrails:
+
+- Real production bundle loading refuses metadata marked as
+  `profile: "windows-smoke"`, `model_kind: "tiny_3d_smoke_backbone"`, or
+  `real_uniprop_used: false`.
+- Real production model mode also refuses checkpoint files whose payload
+  declares `model_kind: "tiny_3d_smoke_backbone"`.
+
+Remaining limitations:
+
+- Windows smoke proves local data, tensor, loss, optimizer, checkpoint, resume,
+  and JSON contracts only.
+- Real UniProp forward/backward execution remains unverified until `nibi-real`
+  is ready with Uni-Core, Uni-Mol+, and staged checkpoints.
+- Full geometry-cache generation and full model training were intentionally not
+  started.
