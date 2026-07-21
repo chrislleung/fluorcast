@@ -125,3 +125,5 @@ models/uniprop*/
 data/processed/uniprop/
 
 /artifacts/
+
+/.venv-uniprop-win/
