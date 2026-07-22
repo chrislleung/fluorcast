@@ -123,8 +123,53 @@ def test_mmff_and_fallback_provenance_are_correct() -> None:
     fallback = generate_geometry_entry(molecule_id("B(O)O"), "B(O)O")
 
     assert mmff["optimization_method"] == "MMFF94"
+    assert mmff["geometry_quality"] == "mmff_converged"
+    assert mmff["mmff_available"] is True
     assert fallback["optimization_method"] == "UFF"
+    assert fallback["geometry_status"] == "success"
+    assert fallback["geometry_quality"] == "uff_converged"
+    assert fallback["mmff_available"] is False
     assert fallback["energy"] is not None
+
+
+def test_valid_uff_cache_is_not_classified_as_unsupported(tmp_path: Path) -> None:
+    entry = generate_geometry_entry(molecule_id("B(O)O"), "B(O)O")
+    path = cache_path(tmp_path, molecule_id("B(O)O"))
+    atomic_write_json(path, entry)
+
+    loaded = read_valid_cache(path, molecule_id("B(O)O"), "B(O)O")
+
+    assert loaded["optimization_method"] == "UFF"
+    assert loaded["geometry_status"] == "success"
+    assert loaded["geometry_quality"] == "uff_converged"
+    assert loaded["force_field_support_status"] == "uff_only"
+
+
+def test_legacy_v1_uff_cache_is_migrated_when_valid(tmp_path: Path) -> None:
+    entry = generate_geometry_entry(molecule_id("B(O)O"), "B(O)O")
+    entry["schema_version"] = "uniprop_geometry_cache_v1"
+    for key in [
+        "geometry_status",
+        "geometry_support_status",
+        "force_field_support_status",
+        "geometry_quality",
+        "model_vocabulary_status",
+        "mmff_available",
+        "uff_available",
+        "embedding_attempts",
+        "optimization_attempts",
+    ]:
+        entry.pop(key, None)
+    entry["checksum"] = payload_checksum(entry)
+    path = cache_path(tmp_path, molecule_id("B(O)O"))
+    atomic_write_json(path, entry)
+
+    loaded = read_valid_cache(path, molecule_id("B(O)O"), "B(O)O")
+
+    assert loaded["schema_version"] == GEOMETRY_SCHEMA_VERSION
+    assert loaded["optimization_method"] == "UFF"
+    assert loaded["geometry_quality"] == "uff_converged"
+    assert loaded["mmff_available"] is False
 
 
 def test_atomic_write_does_not_leave_valid_looking_partial_entry(

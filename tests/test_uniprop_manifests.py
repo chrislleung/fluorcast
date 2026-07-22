@@ -177,3 +177,30 @@ def test_manifest_requires_authoritative_processed_columns(tmp_path: Path) -> No
 
     with pytest.raises(ValueError, match="missing required"):
         build_manifests(bad, TARGETS)
+
+
+def test_uniprop_solvent_overlay_repairs_blank_aliases_without_rewriting_source(tmp_path: Path) -> None:
+    rows = pd.DataFrame(
+        {
+            "chromophore_smiles": ["CCO", "CCN", "CCC"],
+            "solvent_original": ["EtOH", "CCO", "gas"],
+            "canonical_chromophore_smiles": ["CCO", "CCN", "CCC"],
+            "canonical_solvent_smiles": [pd.NA, "CCO", pd.NA],
+            "source_dataset": ["fixture"] * 3,
+            "absorption_nm": [350.0, 360.0, 370.0],
+            "emission_nm": [450.0, 460.0, 470.0],
+            "quantum_yield": [0.1, 0.2, 0.3],
+        }
+    )
+
+    bundle = build_manifests(write_fixture(tmp_path, rows), TARGETS)
+    manifest = bundle.row_manifest
+
+    assert pd.isna(manifest.loc[0, "source_canonical_solvent_smiles"])
+    assert manifest.loc[0, "uniprop_canonical_solvent_smiles"] == "CCO"
+    assert manifest.loc[0, "canonical_solvent_smiles"] == "CCO"
+    assert manifest.loc[0, "uniprop_solvent_mapping_status"] == "resolved_alias"
+    assert manifest.loc[0, "solvent_id"] == manifest.loc[1, "solvent_id"]
+    assert pd.isna(manifest.loc[2, "uniprop_canonical_solvent_smiles"])
+    assert manifest.loc[2, "environment_type"] == "gas_phase"
+    assert bundle.metadata["uniprop_solvent_overlay"]["uniprop_alias_repaired_rows"] == 1

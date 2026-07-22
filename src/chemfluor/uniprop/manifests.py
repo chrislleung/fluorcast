@@ -27,6 +27,8 @@ import pandas as pd
 from rdkit import Chem, RDLogger
 from rdkit.Chem.Scaffolds import MurckoScaffold
 
+from .solvent_normalization import apply_uniprop_solvent_overlay, uniprop_solvent_summary
+
 RDLogger.DisableLog("rdApp.*")
 
 DEFAULT_PROCESSED_DIR = Path("data/processed/fluodb_lite")
@@ -181,7 +183,7 @@ def build_manifests(
 ) -> ManifestBundle:
     """Build molecule and row manifests from the authoritative processed table."""
     source_path = resolve_authoritative_dataset(dataset_path)
-    rows = _read_processed_dataset(source_path).copy()
+    rows = apply_uniprop_solvent_overlay(_read_processed_dataset(source_path))
     targets = _target_columns(rows, target_columns)
     rows["_source_row_number"] = np.arange(len(rows), dtype=int)
 
@@ -206,9 +208,18 @@ def build_manifests(
     rows["_molecule_id"] = rows["_canonical_isomeric_smiles"].map(
         lambda smiles: stable_hash("mol", MANIFEST_SCHEMA_VERSION, smiles)
     )
-    rows["_solvent_key"] = rows["canonical_solvent_smiles"].map(
-        lambda value: "<MISSING_SOLVENT>" if pd.isna(value) else str(value)
-    )
+    def solvent_key(row: pd.Series) -> str:
+        canonical = row.get("uniprop_canonical_solvent_smiles")
+        if pd.notna(canonical) and str(canonical).strip():
+            return f"smiles:{str(canonical).strip()}"
+        environment = row.get("environment_type", "missing_solvent")
+        status = row.get("uniprop_solvent_mapping_status", "missing")
+        normalized = row.get("uniprop_solvent_normalized_name", row.get("solvent_original", "<NA>"))
+        label = normalized if pd.notna(normalized) and str(normalized).strip() else row.get("solvent_original", "<NA>")
+        label_text = "<NA>" if pd.isna(label) else str(label).strip().lower()
+        return f"{environment}:{status}:{label_text}"
+
+    rows["_solvent_key"] = rows.apply(solvent_key, axis=1)
     rows["_solvent_id"] = rows["_solvent_key"].map(
         lambda smiles: stable_hash("solv", MANIFEST_SCHEMA_VERSION, smiles)
     )
@@ -262,11 +273,20 @@ def build_manifests(
             "row_id": row_ids,
             "molecule_id": rows["_molecule_id"].to_numpy(),
             "solvent_id": rows["_solvent_id"].to_numpy(),
-            "canonical_solvent_smiles": rows["canonical_solvent_smiles"].to_numpy(),
+            "canonical_solvent_smiles": rows["uniprop_canonical_solvent_smiles"].to_numpy(),
+            "source_canonical_solvent_smiles": rows["source_canonical_solvent_smiles"].to_numpy(),
+            "uniprop_canonical_solvent_smiles": rows["uniprop_canonical_solvent_smiles"].to_numpy(),
+            "uniprop_solvent_mapping_status": rows["uniprop_solvent_mapping_status"].to_numpy(),
+            "uniprop_solvent_mapping_rule": rows["uniprop_solvent_mapping_rule"].to_numpy(),
+            "uniprop_solvent_normalized_name": rows["uniprop_solvent_normalized_name"].to_numpy(),
+            "environment_type": rows["environment_type"].to_numpy(),
             "source_dataset": rows["source_dataset"].to_numpy(),
             "source_row_number": rows["_source_row_number"].to_numpy(),
         }
     )
+    for column in ["solvent_original"]:
+        if column in rows.columns:
+            row_manifest[column] = rows[column].to_numpy()
     for target in targets:
         row_manifest[target] = rows[target]
         row_manifest[f"{target}_available"] = rows[target].notna()
@@ -279,6 +299,7 @@ def build_manifests(
         "unique_molecules": int(row_manifest["molecule_id"].nunique()),
         "unique_solvents": int(row_manifest["solvent_id"].nunique()),
         "target_columns": targets,
+        "uniprop_solvent_overlay": uniprop_solvent_summary(rows),
         "stereochemical_policy": (
             "molecule_id uses RDKit canonical isomeric SMILES; "
             "canonical_nonisomeric_smiles is retained only for auxiliary grouping."

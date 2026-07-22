@@ -288,7 +288,7 @@ def build_lmdb_record(
     target, target_mask = _target_values(row, target_columns)
     solvent = row["canonical_solvent_smiles"]
     solvent_smi = "" if pd.isna(solvent) else str(solvent)
-    return {
+    record = {
         "atoms": atoms,
         "input_pos": [coordinates],
         "label_pos": coordinates,
@@ -306,6 +306,20 @@ def build_lmdb_record(
         "id": int(integer_id),
         "geometry_cache_schema": geometry.get("schema_version"),
     }
+    if "source_dataset" in row.index:
+        record["source_dataset"] = "" if pd.isna(row["source_dataset"]) else str(row["source_dataset"])
+    if "source_row_number" in row.index and not pd.isna(row["source_row_number"]):
+        record["source_row_number"] = int(row["source_row_number"])
+    for column in [
+        "source_canonical_solvent_smiles",
+        "uniprop_canonical_solvent_smiles",
+        "uniprop_solvent_mapping_status",
+        "uniprop_solvent_mapping_rule",
+        "environment_type",
+    ]:
+        if column in row.index:
+            record[column] = None if pd.isna(row[column]) else str(row[column])
+    return record
 
 
 def _write_lmdb(path: Path, records: list[dict[str, Any]], map_size: int, batch_size: int) -> None:
