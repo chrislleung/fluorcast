@@ -1,0 +1,127 @@
+{
+  "schema_version": "fluorcast_uniprop_feature_schema_v1",
+  "schema_kind": "categorical_feature_schema",
+  "upstream_repo": "https://github.com/AI4DD/nablaColors.git",
+  "upstream_commit": "39095389c0a4ecb47872ef74d00b8d13597939c8",
+  "upstream_source_files": [
+    {
+      "path": "unimol_plus/scripts/get_3d_lmdb.py",
+      "sha256": "fc534b3a034b938e531a133ccdebffa7182f66a39bfa5cfa31e078a56dee925d",
+      "role": "RDKit atom and bond categorical feature construction"
+    },
+    {
+      "path": "unimol_plus/unimol_plus/data/pcq_dataset.py",
+      "sha256": "cfa47e3f73b7fccbb52142c2dd013cb77a6e260d06d449edee2b10b11cbfd3ab",
+      "role": "graph feature preprocessing and single-embedding conversion"
+    },
+    {
+      "path": "unimol_plus/unimol_plus/data/data_utils.py",
+      "sha256": "e610d8702156d6f4623e3fff998010d816088d60a3b98e925699e771aee715b7",
+      "role": "feature bound checks, embedding offsets, and padding"
+    },
+    {
+      "path": "unimol_plus/unimol_plus/models/uniprop.py",
+      "sha256": "1a590993ae26487817a821ea86e324ecf6ab1418be6cf168ac1999db90679bd3",
+      "role": "real UniProp model constructor"
+    },
+    {
+      "path": "unimol_plus/unimol_plus/models/layers.py",
+      "sha256": "0e1322a487c48fcf70fbffd1a88f7c88468453db57a96934a3f049d52577ce92",
+      "role": "AtomFeature, EdgeFeature, and pair kernel embedding consumers"
+    },
+    {
+      "path": "Uni-Core/unicore/checkpoint_utils.py",
+      "sha256": "f8ba0847de811e5e4a3b1071cb5c9dc878b957f43a7e6a96177009fe48081316",
+      "role": "Uni-Core checkpoint loading path"
+    }
+  ],
+  "atom_channels": [
+    {
+      "name": "atomic_number",
+      "cardinality": 128,
+      "allowed_values": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 69, 70, 71, 72, 73, 74, 75, 76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 99, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, "misc"],
+      "encoding": "safe_index(possible_atomic_num_list, atom.GetAtomicNum())"
+    },
+    {
+      "name": "chirality",
+      "cardinality": 16,
+      "allowed_values": ["CHI_UNSPECIFIED", "CHI_TETRAHEDRAL_CW", "CHI_TETRAHEDRAL_CCW", "CHI_TRIGONALBIPYRAMIDAL", "CHI_OCTAHEDRAL", "CHI_SQUAREPLANAR", "CHI_OTHER"],
+      "encoding": "possible_chirality_list.index(str(atom.GetChiralTag()))"
+    },
+    {
+      "name": "total_degree",
+      "cardinality": 16,
+      "allowed_values": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, "misc"],
+      "encoding": "safe_index(possible_degree_list, atom.GetTotalDegree())"
+    },
+    {
+      "name": "formal_charge",
+      "cardinality": 16,
+      "allowed_values": [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5, "misc"],
+      "encoding": "safe_index(possible_formal_charge_list, atom.GetFormalCharge())"
+    },
+    {
+      "name": "total_num_h",
+      "cardinality": 16,
+      "allowed_values": [0, 1, 2, 3, 4, 5, 6, 7, 8, "misc"],
+      "encoding": "safe_index(possible_numH_list, atom.GetTotalNumHs())"
+    },
+    {
+      "name": "radical_electrons",
+      "cardinality": 16,
+      "allowed_values": [0, 1, 2, 3, 4, "misc"],
+      "encoding": "safe_index(possible_number_radical_e_list, atom.GetNumRadicalElectrons())"
+    },
+    {
+      "name": "hybridization",
+      "cardinality": 16,
+      "allowed_values": ["SP", "SP2", "SP3", "SP3D", "SP3D2", "misc"],
+      "encoding": "safe_index(possible_hybridization_list, str(atom.GetHybridization()))"
+    },
+    {
+      "name": "is_aromatic",
+      "cardinality": 16,
+      "allowed_values": [false, true],
+      "encoding": "possible_is_aromatic_list.index(atom.GetIsAromatic())"
+    },
+    {
+      "name": "is_in_ring",
+      "cardinality": 16,
+      "allowed_values": [false, true],
+      "encoding": "possible_is_in_ring_list.index(atom.IsInRing())"
+    }
+  ],
+  "edge_channels": [
+    {
+      "name": "bond_type",
+      "cardinality": 16,
+      "allowed_values": ["SINGLE", "DOUBLE", "TRIPLE", "AROMATIC", "misc"],
+      "encoding": "safe_index(possible_bond_type_list, str(bond.GetBondType()))"
+    },
+    {
+      "name": "bond_stereo",
+      "cardinality": 16,
+      "allowed_values": ["STEREONONE", "STEREOZ", "STEREOE", "STEREOCIS", "STEREOTRANS", "STEREOANY"],
+      "encoding": "possible_bond_stereo_list.index(str(bond.GetStereo()))"
+    },
+    {
+      "name": "is_conjugated",
+      "cardinality": 16,
+      "allowed_values": [false, true],
+      "encoding": "possible_is_conjugated_list.index(bond.GetIsConjugated())"
+    }
+  ],
+  "embedding_rules": {
+    "atom_feat_sizes": [128, 16, 16, 16, 16, 16, 16, 16, 16],
+    "edge_feat_sizes": [16, 16, 16],
+    "single_embedding_offset_start": 1,
+    "atom_padding_idx": 0,
+    "edge_padding_idx": 0,
+    "edge_preprocessing_offset": "convert_to_single_emb(edge_attr, edge_feat_sizes) + 1, then edge_feat tensor adds another +1"
+  },
+  "overflow_or_unknown_policy": {
+    "safe_index_channels": "Unknown values map to the final explicit misc entry before bounds validation.",
+    "strict_index_channels": "Values outside the listed vocabulary raise before model execution.",
+    "validation": "Validate generated node_attr and edge_attr channel counts, integer dtype, nonnegative indices, and per-channel upper bounds before upstream preprocessing and model execution."
+  }
+}

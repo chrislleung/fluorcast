@@ -134,6 +134,7 @@ def test_checkpoint_manifest_schema() -> None:
     for checkpoint in payload["checkpoints"]:
         assert checkpoint["filename"].endswith(".pt")
         assert checkpoint["expected_size_bytes"] > 0
+        assert checkpoint["size_is_exact"] is False
         assert checkpoint["source"].startswith("https://zenodo.org/records/18061300")
         assert checkpoint["checksum_type"] == "md5"
         assert len(checkpoint["checksum"]) == 32

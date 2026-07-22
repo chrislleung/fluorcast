@@ -174,20 +174,25 @@ def checkpoint_report(manifest_path: Path, checkpoint_dir: Path, *, dry_run: boo
         checksum_type = str(item.get("checksum_type") or manifest.get("checksum_type") or "md5")
         expected_checksum = item.get("checksum")
         expected_size = item.get("expected_size_bytes")
+        size_is_exact = bool(item.get("size_is_exact", True))
         present = path.exists()
         actual_size = path.stat().st_size if present else None
         actual_checksum = None if dry_run or not present else file_checksum(path, checksum_type)
+        actual_sha256 = None if dry_run or not present else file_checksum(path, "sha256")
         rows.append(
             {
                 "filename": filename,
                 "path": str(path),
                 "present": present,
                 "expected_size_bytes": expected_size,
+                "size_is_exact": size_is_exact,
                 "actual_size_bytes": actual_size,
                 "size_matches": None if not present else actual_size == expected_size,
+                "size_accepted": None if not present else (actual_size == expected_size or not size_is_exact),
                 "checksum_type": checksum_type,
                 "expected_checksum": expected_checksum,
                 "actual_checksum": actual_checksum,
+                "actual_sha256": actual_sha256,
                 "checksum_matches": None if not present or dry_run else actual_checksum == expected_checksum,
                 "source": item.get("source"),
             }
