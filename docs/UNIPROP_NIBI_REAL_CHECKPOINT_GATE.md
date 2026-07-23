@@ -46,6 +46,7 @@ module load cuda
 
 Create the isolated FluorCast-owned environment. This bootstrap creates only
 `.venv-uniprop`, installs PyTorch from the pip configuration exposed on Nibi,
+installs Alliance-compatible NumPy from the same configuration,
 installs pinned Uni-Core directly from `third_party/nablacolors/Uni-Core`, and
 installs pinned Uni-Mol+ from `third_party/nablacolors/unimol_plus`. It does not
 install Conda, create `unimol_env`, download checkpoints, or run training.
@@ -59,6 +60,13 @@ The explicit `--mode cuda` flag is required for the Nibi GPU bootstrap. Running
 `bash scripts/bootstrap_uniprop.sh --clean` alone uses the script's CPU default
 and is only suitable for CPU-mode environment checks.
 
+The default NumPy requirement is the public version pin `numpy==2.2.2`. Alliance
+may satisfy that with a local distributor wheel such as
+`2.2.2+computecanada`; the bootstrap validates the public/base version while
+allowing that local suffix. The requirement is intentionally not written with
+`+computecanada`, so standard pip version matching can select the Alliance wheel
+without making the script unusable outside that wheelhouse.
+
 Uni-Core's `setup.py` imports `torch` while pip is preparing the build, before
 the package itself is installed. PyTorch is already installed in `.venv-uniprop`,
 but pip's temporary PEP 517 build-isolation environment cannot see it, which
@@ -71,10 +79,10 @@ pinned checkout with pip build isolation disabled:
 ```
 
 The bootstrap first installs build prerequisites into `.venv-uniprop`, including
-`setuptools`, `wheel`, upstream-pinned `numpy==2.2.6`, and the requested PyTorch
-wheel. This removes the PyTorch NumPy initialization warning and ensures
-Uni-Core's build process imports the same environment-installed PyTorch package
-that the final runtime gate will use.
+`setuptools`, `wheel`, `packaging`, Alliance-compatible `numpy==2.2.2`, and the
+requested PyTorch wheel. This removes the PyTorch NumPy initialization warning
+and ensures Uni-Core's build process imports the same environment-installed
+PyTorch package that the final runtime gate will use.
 
 Expected post-bootstrap import diagnostic:
 
@@ -112,11 +120,17 @@ PY
 CUDA may report unavailable on a login node. The tiny GPU gate performs the
 actual CUDA runtime check inside the Slurm allocation. In CUDA bootstrap mode,
 however, `torch.version.cuda` must not be `None`; a `None` compiled CUDA version
-means pip selected a CPU-only PyTorch wheel and the bootstrap must fail. If
-optional Uni-Core fused CUDA extensions must be built with compute-node
-CUDA/nvcc access, rerun the bootstrap inside that allocation with
-`--enable-cuda-ext`; the default bootstrap still requires all UniProp imports
-used by this gate to succeed.
+means pip selected a CPU-only PyTorch wheel and the bootstrap must fail.
+
+The loaded CUDA toolkit module and PyTorch's compiled CUDA runtime are separate
+facts. For the default bootstrap, optional Uni-Core fused CUDA extensions are not
+compiled, so a loaded toolkit such as `cuda/12.6` may differ from a PyTorch wheel
+compiled for CUDA `12.2` without failing the bootstrap. When
+`--enable-cuda-ext` is supplied, the bootstrap checks `nvcc --version` against
+`torch.version.cuda` and fails before compilation if they differ; load a CUDA
+module matching the PyTorch build before compiling those optional extensions.
+The default bootstrap still requires all UniProp imports used by this gate to
+succeed.
 
 Stage one checkpoint only:
 

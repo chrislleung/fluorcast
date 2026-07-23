@@ -18,6 +18,9 @@ MANIFEST = PROJECT_ROOT / "configs" / "uniprop" / "checkpoint_manifest.json"
 BUILD_ISOLATION_FAILURE = (
     PROJECT_ROOT / "tests" / "fixtures" / "uniprop_pip_build_isolation_failure.txt"
 )
+NUMPY_UNAVAILABLE_FAILURE = (
+    PROJECT_ROOT / "tests" / "fixtures" / "uniprop_numpy_226_unavailable_failure.txt"
+)
 
 
 def _bash() -> str:
@@ -81,7 +84,8 @@ def test_bootstrap_dry_run_does_not_create_clone_or_venv(tmp_path: Path) -> None
     assert "unimol_env" not in result.stdout
     assert "python=3.12" not in result.stdout
     assert "torch==2.6.*" in result.stdout
-    assert "numpy==2.2.6" in result.stdout
+    assert "numpy==2.2.2" in result.stdout
+    assert "numpy==2.2.6" not in BOOTSTRAP.read_text(encoding="utf-8")
 
 
 def test_bootstrap_revision_mismatch_detection(tmp_path: Path) -> None:
@@ -116,7 +120,9 @@ def test_cuda_bootstrap_contract_avoids_upstream_conda_installer() -> None:
     assert "unimol_env" not in text
     assert "python=3.12" not in text
     assert "torch==2.6.*" in text
-    assert "numpy==2.2.6" in text
+    assert "numpy==2.2.2" in text
+    assert "numpy==2.2.6" not in text
+    assert "FLUORCAST_UNIPROP_NUMPY_REQUIREMENT" in text
     assert "UNICORE_INSTALL_ARGS=(\"$UNICORE_DIR\")" in text
     assert 'pip install --no-build-isolation "${UNICORE_INSTALL_ARGS[@]}"' in text
     assert "pip install -e \"$UNIMOL_PLUS_DIR\"" in text
@@ -126,6 +132,7 @@ def test_bootstrap_completion_diagnostic_requires_real_imports() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
     required = [
         "import torch",
+        "import numpy",
         "import unicore",
         "import unimol_plus",
         "from unimol_plus.models.uniprop import UniPropModel",
@@ -152,6 +159,8 @@ def test_bootstrap_does_not_download_checkpoints_or_train() -> None:
 
 def test_bootstrap_stages_stop_on_install_failures() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert 'fail "No compatible NumPy wheel found' in text
+    assert 'fail "NumPy validation failed."' in text
     assert 'pip install "$TORCH_SPEC"' in text
     assert 'fail "Uni-Core build prerequisites are unavailable."' in text
     assert 'fail "No compatible PyTorch wheel found' in text
@@ -192,10 +201,47 @@ def test_cuda_mode_is_preserved_when_explicitly_supplied(tmp_path: Path) -> None
 
 def test_bootstrap_installs_numpy_before_torch_runtime_diagnostic() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
+    numpy_preflight = text.index('stage "NumPy availability preflight"')
     numpy_install = text.index('pip install "$NUMPY_SPEC"')
     torch_stage = text.index('stage "PyTorch"')
     torch_diagnostic = text.index("PyTorch version: {torch.__version__}")
-    assert numpy_install < torch_stage < torch_diagnostic
+    assert numpy_preflight < numpy_install < torch_stage < torch_diagnostic
+
+
+def test_numpy_preflight_uses_structured_pip_report_before_pytorch() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    preflight = text.index('stage "NumPy availability preflight"')
+    pytorch = text.index('stage "PyTorch"')
+    assert "pip install --dry-run --report" in text[preflight:pytorch]
+    assert "Selected NumPy wheel/version" in text[preflight:pytorch]
+    assert "metadata" in text[preflight:pytorch]
+
+
+def test_numpy_local_alliance_suffix_is_accepted_by_base_version() -> None:
+    from packaging.version import Version
+
+    assert Version("2.2.2+computecanada").base_version == "2.2.2"
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert "Version(selected).base_version" in text
+    assert "Version(numpy.__version__)" in text
+    assert "installed.base_version != expected_base" in text
+
+
+def test_unexpected_numpy_public_version_fails_validation() -> None:
+    from packaging.version import Version
+
+    assert Version("2.2.6").base_version != "2.2.2"
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert "does not match requested" in text
+
+
+def test_numpy_failures_stop_before_pytorch() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    numpy_preflight_failure = text.index('fail "No compatible NumPy wheel found')
+    numpy_validation_failure = text.index('fail "NumPy validation failed."')
+    pytorch = text.index('stage "PyTorch"')
+    assert numpy_preflight_failure < pytorch
+    assert numpy_validation_failure < pytorch
 
 
 def test_cuda_path_rejects_cpu_only_torch() -> None:
@@ -222,10 +268,30 @@ def test_unicore_failure_prevents_unimol_plus_attempt() -> None:
     assert unicore_import < unimol_install
 
 
+def test_unicore_is_not_attempted_when_pytorch_fails() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    torch_validation = text.index('fail "PyTorch validation failed."')
+    unicore_install = text.index('stage "Uni-Core direct install"')
+    assert torch_validation < unicore_install
+
+
 def test_build_isolation_failure_fixture_matches_real_regression() -> None:
     fixture = BUILD_ISOLATION_FAILURE.read_text(encoding="utf-8")
     assert "Getting requirements to build wheel: finished with status 'error'" in fixture
     assert "ModuleNotFoundError: No module named 'torch'" in fixture
+
+
+def test_numpy_unavailable_failure_fixture_matches_real_regression() -> None:
+    fixture = NUMPY_UNAVAILABLE_FAILURE.read_text(encoding="utf-8")
+    assert "Could not find a version that satisfies the requirement numpy==2.2.6" in fixture
+    assert "No matching distribution found for numpy==2.2.6" in fixture
+
+
+def test_optional_cuda_extension_toolkit_guard_is_strict_only_when_requested() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert "Loaded CUDA toolkit version:" in text
+    assert "Optional Uni-Core fused CUDA extensions are not being compiled" in text
+    assert "does not match PyTorch compiled CUDA" in text
 
 
 def test_audit_missing_checkpoint_report_json_schema(tmp_path: Path) -> None:

@@ -30,7 +30,7 @@ UPSTREAM_DIR="third_party/nablacolors"
 REVISION_FILE="third_party/nablacolors.REVISION"
 REPO_URL=""
 TORCH_SPEC="${FLUORCAST_UNIPROP_TORCH_SPEC:-torch==2.6.*}"
-NUMPY_SPEC="${FLUORCAST_UNIPROP_NUMPY_SPEC:-numpy==2.2.6}"
+NUMPY_SPEC="${FLUORCAST_UNIPROP_NUMPY_REQUIREMENT:-${FLUORCAST_UNIPROP_NUMPY_SPEC:-numpy==2.2.2}}"
 ENABLE_CUDA_EXT=0
 CLEAN=0
 DRY_RUN=0
@@ -199,7 +199,7 @@ echo "PyTorch requirement: $TORCH_SPEC"
 echo "NumPy requirement: $NUMPY_SPEC"
 export FLUORCAST_UNIPROP_BOOTSTRAP_MODE="$MODE"
 export FLUORCAST_UNIPROP_TORCH_SPEC="$TORCH_SPEC"
-export FLUORCAST_UNIPROP_NUMPY_SPEC="$NUMPY_SPEC"
+export FLUORCAST_UNIPROP_NUMPY_REQUIREMENT="$NUMPY_SPEC"
 
 stage "Pinned upstream checkout"
 if [[ -d "$UPSTREAM_DIR" ]]; then
@@ -268,9 +268,90 @@ print(f"Environment path: {sys.prefix}")
 PY
 )" || fail "Python 3.10 virtual environment validation failed."
 
-stage "Build tools and NumPy"
-run_cmd "$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel
+stage "Build tools"
+run_cmd "$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel packaging
+
+stage "NumPy availability preflight"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    run_cmd "$VENV_PYTHON" -m pip install --dry-run --report "<numpy-report>" "$NUMPY_SPEC"
+else
+    NUMPY_REPORT="$(mktemp)"
+    if ! "$VENV_PYTHON" -m pip install --dry-run --report "$NUMPY_REPORT" "$NUMPY_SPEC"; then
+        rm -f "$NUMPY_REPORT"
+        fail "No compatible NumPy wheel found for $NUMPY_SPEC with Python $("$VENV_PYTHON" -c 'import sys; print(sys.version.split()[0])')."
+    fi
+    "$VENV_PYTHON" - "$NUMPY_REPORT" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+from packaging.requirements import Requirement
+from packaging.version import Version
+
+requested = os.environ["FLUORCAST_UNIPROP_NUMPY_REQUIREMENT"]
+requirement = Requirement(requested)
+expected_versions = [
+    spec.version
+    for spec in requirement.specifier
+    if spec.operator in {"==", "==="} and "*" not in spec.version
+]
+if len(expected_versions) != 1:
+    raise SystemExit(f"NumPy requirement must be an exact public-version pin, got {requested!r}.")
+expected_base = Version(expected_versions[0]).base_version
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+matches = [item for item in payload.get("install", []) if item.get("metadata", {}).get("name", "").lower() == "numpy"]
+if matches:
+    numpy_item = matches[0]
+    metadata = numpy_item.get("metadata", {})
+    download = numpy_item.get("download_info", {})
+    selected = metadata.get("version")
+    source = download.get("url", "configured pip source")
+else:
+    import numpy
+    selected = numpy.__version__
+    source = "already installed in virtual environment"
+if Version(selected).base_version != expected_base:
+    raise SystemExit(f"Selected NumPy public version {Version(selected).base_version} does not match requested {expected_base}.")
+print(f"Requested NumPy requirement: {requested}")
+print(f"Selected NumPy wheel/version: numpy {selected} from {source}")
+print(f"Selected NumPy has local suffix: {Version(selected).local is not None}")
+print(f"Python version for NumPy resolver: {sys.version.split()[0]}")
+PY
+    rm -f "$NUMPY_REPORT"
+fi
+
+stage "NumPy"
 run_cmd "$VENV_PYTHON" -m pip install "$NUMPY_SPEC"
+python_here "$(cat <<'PY'
+import os
+import sys
+from packaging.requirements import Requirement
+from packaging.version import Version
+
+import numpy
+
+requested = os.environ["FLUORCAST_UNIPROP_NUMPY_REQUIREMENT"]
+requirement = Requirement(requested)
+expected_versions = [
+    spec.version
+    for spec in requirement.specifier
+    if spec.operator in {"==", "==="} and "*" not in spec.version
+]
+if len(expected_versions) != 1:
+    raise SystemExit(f"NumPy requirement must be an exact public-version pin, got {requested!r}.")
+expected_base = Version(expected_versions[0]).base_version
+installed = Version(numpy.__version__)
+print("NumPy diagnostic:")
+print(f"  Requested NumPy requirement: {requested}")
+print(f"  Installed NumPy version: {numpy.__version__}")
+print(f"  NumPy import path: {getattr(numpy, '__file__', None)}")
+print(f"  Installed NumPy has Alliance/local suffix: {installed.local is not None}")
+print(f"  Python executable: {sys.executable}")
+print(f"  Environment prefix: {sys.prefix}")
+if installed.base_version != expected_base:
+    raise SystemExit(f"Installed NumPy public version {installed.base_version} does not match requested {expected_base}.")
+PY
+)" || fail "NumPy validation failed."
 
 stage "PyTorch"
 if [[ "$MODE" == "cpu" ]]; then
@@ -365,6 +446,39 @@ if os.environ.get("FLUORCAST_UNIPROP_BOOTSTRAP_MODE") == "cuda" and getattr(torc
 PY
 )" || fail "Uni-Core build prerequisites are unavailable."
 
+stage "CUDA toolkit compatibility"
+python_here "$(cat <<'PY'
+import os
+import re
+import shutil
+import subprocess
+import torch
+
+def nvcc_version() -> str | None:
+    nvcc = shutil.which("nvcc")
+    if nvcc is None:
+        return None
+    output = subprocess.check_output([nvcc, "--version"], text=True, stderr=subprocess.STDOUT)
+    match = re.search(r"release\s+([0-9]+(?:\.[0-9]+)?)", output)
+    return match.group(1) if match else "unknown"
+
+requested_extensions = os.environ["FLUORCAST_UNIPROP_ENABLE_CUDA_EXT"] == "1"
+toolkit = nvcc_version()
+torch_cuda = getattr(torch.version, "cuda", None)
+print(f"Loaded CUDA toolkit version: {toolkit}")
+print(f"PyTorch compiled CUDA version: {torch_cuda}")
+if requested_extensions:
+    if toolkit is None:
+        raise SystemExit("Optional Uni-Core CUDA extensions require nvcc; load a CUDA module matching the PyTorch build.")
+    if torch_cuda is None:
+        raise SystemExit("Optional Uni-Core CUDA extensions require a CUDA-enabled PyTorch build.")
+    if toolkit != torch_cuda:
+        raise SystemExit(f"Loaded CUDA toolkit {toolkit} does not match PyTorch compiled CUDA {torch_cuda}; load a CUDA module matching the PyTorch build before compiling optional Uni-Core extensions.")
+else:
+    print("Optional Uni-Core fused CUDA extensions are not being compiled; toolkit/runtime version differences are informational.")
+PY
+)" || fail "CUDA toolkit compatibility check failed."
+
 stage "Uni-Core direct install"
 UNICORE_INSTALL_ARGS=("$UNICORE_DIR")
 if [[ "$ENABLE_CUDA_EXT" -eq 1 ]]; then
@@ -413,6 +527,7 @@ from pathlib import Path
 import torch
 import unicore
 import unimol_plus
+import numpy
 from unimol_plus.models.uniprop import UniPropModel
 
 upstream_dir = Path(os.environ["FLUORCAST_UNIPROP_UPSTREAM_DIR"])
@@ -430,6 +545,7 @@ print("Bootstrap diagnostic:")
 print(f"  Python executable: {sys.executable}")
 print(f"  Python version: {sys.version.split()[0]}")
 print(f"  Environment path: {sys.prefix}")
+print(f"  NumPy version: {numpy.__version__}")
 print(f"  PyTorch version: {torch.__version__}")
 print(f"  Torch compiled CUDA version: {getattr(torch.version, 'cuda', None)}")
 print(f"  CUDA available at runtime: {torch.cuda.is_available()}")
