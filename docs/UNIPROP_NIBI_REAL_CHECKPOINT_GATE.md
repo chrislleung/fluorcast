@@ -55,6 +55,27 @@ bash scripts/bootstrap_uniprop.sh --mode cuda --python python3.10 --clean
 source .venv-uniprop/bin/activate
 ```
 
+The explicit `--mode cuda` flag is required for the Nibi GPU bootstrap. Running
+`bash scripts/bootstrap_uniprop.sh --clean` alone uses the script's CPU default
+and is only suitable for CPU-mode environment checks.
+
+Uni-Core's `setup.py` imports `torch` while pip is preparing the build, before
+the package itself is installed. PyTorch is already installed in `.venv-uniprop`,
+but pip's temporary PEP 517 build-isolation environment cannot see it, which
+causes `ModuleNotFoundError: No module named 'torch'` during metadata/build
+requirements discovery. The direct Uni-Core install therefore runs from the
+pinned checkout with pip build isolation disabled:
+
+```bash
+.venv-uniprop/bin/python -m pip install --no-build-isolation third_party/nablacolors/Uni-Core
+```
+
+The bootstrap first installs build prerequisites into `.venv-uniprop`, including
+`setuptools`, `wheel`, upstream-pinned `numpy==2.2.6`, and the requested PyTorch
+wheel. This removes the PyTorch NumPy initialization warning and ensures
+Uni-Core's build process imports the same environment-installed PyTorch package
+that the final runtime gate will use.
+
 Expected post-bootstrap import diagnostic:
 
 ```bash
@@ -89,10 +110,13 @@ PY
 ```
 
 CUDA may report unavailable on a login node. The tiny GPU gate performs the
-actual CUDA runtime check inside the Slurm allocation. If optional Uni-Core
-fused CUDA extensions must be built with compute-node CUDA/nvcc access, rerun
-the bootstrap inside that allocation with `--enable-cuda-ext`; the default
-bootstrap still requires all UniProp imports used by this gate to succeed.
+actual CUDA runtime check inside the Slurm allocation. In CUDA bootstrap mode,
+however, `torch.version.cuda` must not be `None`; a `None` compiled CUDA version
+means pip selected a CPU-only PyTorch wheel and the bootstrap must fail. If
+optional Uni-Core fused CUDA extensions must be built with compute-node
+CUDA/nvcc access, rerun the bootstrap inside that allocation with
+`--enable-cuda-ext`; the default bootstrap still requires all UniProp imports
+used by this gate to succeed.
 
 Stage one checkpoint only:
 

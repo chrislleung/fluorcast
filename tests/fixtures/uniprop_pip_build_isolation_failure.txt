@@ -1,0 +1,4 @@
+Getting requirements to build wheel: finished with status 'error'
+ModuleNotFoundError: No module named 'torch'
+ERROR: Failed to build
+third_party/nablacolors/Uni-Core

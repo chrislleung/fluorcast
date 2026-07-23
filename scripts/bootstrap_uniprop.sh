@@ -30,6 +30,7 @@ UPSTREAM_DIR="third_party/nablacolors"
 REVISION_FILE="third_party/nablacolors.REVISION"
 REPO_URL=""
 TORCH_SPEC="${FLUORCAST_UNIPROP_TORCH_SPEC:-torch==2.6.*}"
+NUMPY_SPEC="${FLUORCAST_UNIPROP_NUMPY_SPEC:-numpy==2.2.6}"
 ENABLE_CUDA_EXT=0
 CLEAN=0
 DRY_RUN=0
@@ -133,6 +134,7 @@ write_json_report() {
   "revision_file": "$(json_escape "$REVISION_FILE")",
   "pinned_commit": "$(json_escape "${PINNED_COMMIT:-}")",
   "torch_spec": "$(json_escape "$TORCH_SPEC")",
+  "numpy_spec": "$(json_escape "$NUMPY_SPEC")",
   "enable_cuda_ext": $ENABLE_CUDA_EXT
 }
 JSON
@@ -194,8 +196,10 @@ echo "Pinned nablaColors ref: ${PINNED_REF:-unknown}"
 echo "Upstream directory: $UPSTREAM_DIR"
 echo "Virtual environment: $VENV_DIR"
 echo "PyTorch requirement: $TORCH_SPEC"
+echo "NumPy requirement: $NUMPY_SPEC"
 export FLUORCAST_UNIPROP_BOOTSTRAP_MODE="$MODE"
 export FLUORCAST_UNIPROP_TORCH_SPEC="$TORCH_SPEC"
+export FLUORCAST_UNIPROP_NUMPY_SPEC="$NUMPY_SPEC"
 
 stage "Pinned upstream checkout"
 if [[ -d "$UPSTREAM_DIR" ]]; then
@@ -264,8 +268,9 @@ print(f"Environment path: {sys.prefix}")
 PY
 )" || fail "Python 3.10 virtual environment validation failed."
 
-stage "Build tools"
+stage "Build tools and NumPy"
 run_cmd "$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel
+run_cmd "$VENV_PYTHON" -m pip install "$NUMPY_SPEC"
 
 stage "PyTorch"
 if [[ "$MODE" == "cpu" ]]; then
@@ -327,6 +332,39 @@ if os.environ.get("FLUORCAST_UNIPROP_BOOTSTRAP_MODE") == "cuda" and getattr(torc
 PY
 )" || fail "PyTorch validation failed."
 
+stage "Uni-Core build prerequisite diagnostic"
+export FLUORCAST_UNIPROP_UNICORE_DIR="$UNICORE_DIR"
+export FLUORCAST_UNIPROP_ENABLE_CUDA_EXT="$ENABLE_CUDA_EXT"
+python_here "$(cat <<'PY'
+import os
+import sys
+from importlib import metadata
+from pathlib import Path
+
+import numpy
+import pip
+import setuptools
+import torch
+import wheel
+
+pip_executable = Path(sys.executable).with_name("pip")
+print("Uni-Core build prerequisite diagnostic:")
+print(f"  Python executable: {sys.executable}")
+print(f"  pip executable: {pip_executable}")
+print(f"  pip version: {pip.__version__}")
+print(f"  setuptools version: {setuptools.__version__}")
+print(f"  wheel version: {metadata.version('wheel')}")
+print(f"  NumPy version: {numpy.__version__}")
+print(f"  PyTorch version: {torch.__version__}")
+print(f"  PyTorch compiled CUDA version: {getattr(torch.version, 'cuda', None)}")
+print(f"  Uni-Core source directory: {os.environ['FLUORCAST_UNIPROP_UNICORE_DIR']}")
+print("  Build isolation disabled: yes")
+print(f"  Optional CUDA extensions requested: {os.environ['FLUORCAST_UNIPROP_ENABLE_CUDA_EXT'] == '1'}")
+if os.environ.get("FLUORCAST_UNIPROP_BOOTSTRAP_MODE") == "cuda" and getattr(torch.version, "cuda", None) is None:
+    raise SystemExit("Installed torch is CPU-only; CUDA mode requires an Alliance CUDA-capable torch wheel.")
+PY
+)" || fail "Uni-Core build prerequisites are unavailable."
+
 stage "Uni-Core direct install"
 UNICORE_INSTALL_ARGS=("$UNICORE_DIR")
 if [[ "$ENABLE_CUDA_EXT" -eq 1 ]]; then
@@ -336,7 +374,7 @@ else
     echo "Optional Uni-Core fused CUDA extensions are not requested during bootstrap."
     echo "For a compute-node CUDA-extension build, rerun after loading CUDA/nvcc with --enable-cuda-ext."
 fi
-run_cmd "$VENV_PYTHON" -m pip install "${UNICORE_INSTALL_ARGS[@]}" || fail "Uni-Core installation failed."
+run_cmd "$VENV_PYTHON" -m pip install --no-build-isolation "${UNICORE_INSTALL_ARGS[@]}" || fail "Uni-Core installation failed."
 
 stage "Uni-Core import validation"
 python_here "$(cat <<'PY'
