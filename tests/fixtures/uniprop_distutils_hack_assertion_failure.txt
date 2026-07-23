@@ -1,0 +1,13 @@
+Traceback (most recent call last):
+  File ".../site-packages/setuptools/__init__.py", line 21, in <module>
+    import _distutils_hack.override
+  File ".../site-packages/_distutils_hack/override.py", line 1, in <module>
+    __import__("_distutils_hack").do_override()
+  File ".../site-packages/_distutils_hack/__init__.py", line 89, in do_override
+    ensure_local_distutils()
+  File ".../site-packages/_distutils_hack/__init__.py", line 76, in ensure_local_distutils
+    assert "_distutils" in core.__file__, core.__file__
+AssertionError:
+/cvmfs/soft.computecanada.ca/easybuild/software/2023/x86-64-v4/Compiler/gcccore/python/3.10.13/lib/python3.10/distutils/core.py
+
+ERROR: Uni-Core build prerequisites are unavailable.

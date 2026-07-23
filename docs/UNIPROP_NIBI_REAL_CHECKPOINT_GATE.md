@@ -72,10 +72,43 @@ the package itself is installed. PyTorch is already installed in `.venv-uniprop`
 but pip's temporary PEP 517 build-isolation environment cannot see it, which
 causes `ModuleNotFoundError: No module named 'torch'` during metadata/build
 requirements discovery. The direct Uni-Core install therefore runs from the
-pinned checkout with pip build isolation disabled:
+pinned checkout with pip build isolation disabled.
+
+Uni-Core has a second Python 3.10-specific build compatibility issue on Nibi:
+the pinned `third_party/nablacolors/Uni-Core/setup.py` imports in this order:
+
+```python
+import torch
+from torch.utils import cpp_extension
+from torch.utils.cpp_extension import CUDAExtension, BuildExtension
+from setuptools import find_packages, setup
+```
+
+PyTorch can leave Python 3.10's standard-library `distutils` loaded before
+modern `setuptools` starts its default vendored-distutils override. In that
+state, `_distutils_hack.ensure_local_distutils()` can assert because
+`distutils.core.__file__` resolves under
+`.../python/3.10.13/lib/python3.10/distutils/core.py` instead of
+`.../site-packages/setuptools/_distutils/core.py`.
+
+The bootstrap does not patch the pinned upstream Uni-Core source or reorder its
+imports, and it does not downgrade `setuptools`. Because Python 3.10 still has
+stdlib `distutils` available, the Uni-Core compatibility probe and Uni-Core pip
+build subprocess are run with the official scoped setting
+`SETUPTOOLS_USE_DISTUTILS=stdlib`. This fix is distinct from disabling pip build
+isolation: `--no-build-isolation` makes the already-installed PyTorch visible to
+the build, while `SETUPTOOLS_USE_DISTUTILS=stdlib` prevents the setuptools
+vendored-distutils collision after PyTorch has been imported. Do not substitute
+Python 3.12 for this gate; Python 3.12 removed stdlib `distutils`, so this
+compatibility mode is not available there.
+
+The effective Uni-Core install command is:
 
 ```bash
-.venv-uniprop/bin/python -m pip install --no-build-isolation third_party/nablacolors/Uni-Core
+env SETUPTOOLS_USE_DISTUTILS=stdlib \
+  .venv-uniprop/bin/python -m pip install \
+  --no-build-isolation \
+  third_party/nablacolors/Uni-Core
 ```
 
 The bootstrap first installs build prerequisites into `.venv-uniprop`, including
@@ -83,6 +116,13 @@ The bootstrap first installs build prerequisites into `.venv-uniprop`, including
 requested PyTorch wheel. This removes the PyTorch NumPy initialization warning
 and ensures Uni-Core's build process imports the same environment-installed
 PyTorch package that the final runtime gate will use.
+
+Uni-Mol+ is installed from `third_party/nablacolors/unimol_plus`. Its setup file
+imports `setuptools` before declaring runtime dependencies and does not match
+the Uni-Core `torch`-then-`setuptools` failure path, so the
+`SETUPTOOLS_USE_DISTUTILS=stdlib` setting remains Uni-Core-specific unless a
+future Nibi source-install failure proves Uni-Mol+ needs the same scoped
+compatibility mode.
 
 Expected post-bootstrap import diagnostic:
 

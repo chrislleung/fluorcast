@@ -21,6 +21,9 @@ BUILD_ISOLATION_FAILURE = (
 NUMPY_UNAVAILABLE_FAILURE = (
     PROJECT_ROOT / "tests" / "fixtures" / "uniprop_numpy_226_unavailable_failure.txt"
 )
+DISTUTILS_ASSERTION_FAILURE = (
+    PROJECT_ROOT / "tests" / "fixtures" / "uniprop_distutils_hack_assertion_failure.txt"
+)
 
 
 def _bash() -> str:
@@ -124,7 +127,11 @@ def test_cuda_bootstrap_contract_avoids_upstream_conda_installer() -> None:
     assert "numpy==2.2.6" not in text
     assert "FLUORCAST_UNIPROP_NUMPY_REQUIREMENT" in text
     assert "UNICORE_INSTALL_ARGS=(\"$UNICORE_DIR\")" in text
-    assert 'pip install --no-build-isolation "${UNICORE_INSTALL_ARGS[@]}"' in text
+    unicore_install = (
+        'env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" -m pip install '
+        '--no-build-isolation "${UNICORE_INSTALL_ARGS[@]}"'
+    )
+    assert unicore_install in text
     assert "pip install -e \"$UNIMOL_PLUS_DIR\"" in text
 
 
@@ -253,10 +260,69 @@ def test_cuda_path_rejects_cpu_only_torch() -> None:
 def test_unicore_build_uses_environment_torch_without_isolation() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
     diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
-    install = text.index('pip install --no-build-isolation "${UNICORE_INSTALL_ARGS[@]}"')
+    install = text.index(
+        'env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" -m pip install '
+        '--no-build-isolation "${UNICORE_INSTALL_ARGS[@]}"'
+    )
     assert diagnostic < install
     assert "import torch" in text[diagnostic:install]
     assert "Build isolation disabled: yes" in text[diagnostic:install]
+
+
+def test_unicore_diagnostic_uses_metadata_before_setuptools_import() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
+    install = text.index('stage "CUDA toolkit compatibility"')
+    block = text[diagnostic:install]
+    metadata_lookup = block.index('setuptools_version = version("setuptools")')
+    setuptools_import = block.index("import setuptools")
+    assert "from importlib.metadata import version" in block
+    assert "import pip" not in block
+    assert metadata_lookup < setuptools_import
+
+
+def test_unicore_compatibility_probe_receives_stdlib_distutils_env() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
+    install = text.index('stage "CUDA toolkit compatibility"')
+    block = text[diagnostic:install]
+    assert 'python_here_env "SETUPTOOLS_USE_DISTUTILS=stdlib"' in block
+    assert 'os.environ.get("SETUPTOOLS_USE_DISTUTILS") != "stdlib"' in block
+    assert "SETUPTOOLS_USE_DISTUTILS: {os.environ.get('SETUPTOOLS_USE_DISTUTILS')}" in block
+    assert "distutils.core path:" in block
+
+
+def test_unicore_probe_represents_upstream_torch_then_setuptools_order() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
+    install = text.index('stage "CUDA toolkit compatibility"')
+    block = text[diagnostic:install]
+    torch_import = block.index("import torch")
+    setuptools_import = block.index("import setuptools")
+    distutils_import = block.index("import distutils.core")
+    assert torch_import < setuptools_import < distutils_import
+
+
+def test_unicore_install_receives_scoped_stdlib_distutils_env() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    install_stage = text.index('stage "Uni-Core direct install"')
+    import_validation = text.index('stage "Uni-Core import validation"')
+    block = text[install_stage:import_validation]
+    unicore_install = (
+        'run_cmd env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" '
+        '-m pip install --no-build-isolation "${UNICORE_INSTALL_ARGS[@]}"'
+    )
+    assert unicore_install in block
+
+
+def test_setuptools_distutils_setting_is_scoped_to_unicore_subprocesses() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert "export SETUPTOOLS_USE_DISTUTILS" not in text
+    assert text.count('python_here_env "SETUPTOOLS_USE_DISTUTILS=stdlib"') == 1
+    assert text.count("run_cmd env SETUPTOOLS_USE_DISTUTILS=stdlib") == 1
+    assert "SETUPTOOLS_USE_DISTUTILS=stdlib" not in text[
+        text.index('stage "Uni-Mol+ direct install"') :
+    ]
 
 
 def test_unicore_failure_prevents_unimol_plus_attempt() -> None:
@@ -279,6 +345,12 @@ def test_build_isolation_failure_fixture_matches_real_regression() -> None:
     fixture = BUILD_ISOLATION_FAILURE.read_text(encoding="utf-8")
     assert "Getting requirements to build wheel: finished with status 'error'" in fixture
     assert "ModuleNotFoundError: No module named 'torch'" in fixture
+
+
+def test_distutils_hack_assertion_fixture_matches_real_regression() -> None:
+    fixture = DISTUTILS_ASSERTION_FAILURE.read_text(encoding="utf-8")
+    assert "AssertionError:" in fixture
+    assert "/python/3.10.13/lib/python3.10/distutils/core.py" in fixture
 
 
 def test_numpy_unavailable_failure_fixture_matches_real_regression() -> None:

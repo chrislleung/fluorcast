@@ -171,6 +171,16 @@ python_here() {
     fi
 }
 
+python_here_env() {
+    local env_assignment="$1"
+    local script="$2"
+    if [[ "$DRY_RUN" -eq 1 ]]; then
+        printf 'DRY-RUN: env %q %q - <<'\''PY'\''\n%s\nPY\n' "$env_assignment" "$VENV_PYTHON" "$script"
+    else
+        env "$env_assignment" "$VENV_PYTHON" - <<<"$script"
+    fi
+}
+
 if [[ ! -f "$REVISION_FILE" ]]; then
     echo "Revision file not found: $REVISION_FILE" >&2
     exit 2
@@ -416,28 +426,39 @@ PY
 stage "Uni-Core build prerequisite diagnostic"
 export FLUORCAST_UNIPROP_UNICORE_DIR="$UNICORE_DIR"
 export FLUORCAST_UNIPROP_ENABLE_CUDA_EXT="$ENABLE_CUDA_EXT"
-python_here "$(cat <<'PY'
+python_here_env "SETUPTOOLS_USE_DISTUTILS=stdlib" "$(cat <<'PY'
 import os
 import sys
-from importlib import metadata
+from importlib.metadata import version
 from pathlib import Path
 
 import numpy
-import pip
-import setuptools
 import torch
-import wheel
+
+setuptools_version = version("setuptools")
+wheel_version = version("wheel")
+pip_version = version("pip")
+
+if os.environ.get("SETUPTOOLS_USE_DISTUTILS") != "stdlib":
+    raise SystemExit("Uni-Core compatibility probe requires SETUPTOOLS_USE_DISTUTILS=stdlib.")
+
+import setuptools
+import distutils.core
 
 pip_executable = Path(sys.executable).with_name("pip")
 print("Uni-Core build prerequisite diagnostic:")
 print(f"  Python executable: {sys.executable}")
+print(f"  Python version: {sys.version.split()[0]}")
+print(f"  Environment path: {sys.prefix}")
 print(f"  pip executable: {pip_executable}")
-print(f"  pip version: {pip.__version__}")
-print(f"  setuptools version: {setuptools.__version__}")
-print(f"  wheel version: {metadata.version('wheel')}")
+print(f"  pip version: {pip_version}")
+print(f"  setuptools version: {setuptools_version}")
+print(f"  wheel version: {wheel_version}")
 print(f"  NumPy version: {numpy.__version__}")
 print(f"  PyTorch version: {torch.__version__}")
 print(f"  PyTorch compiled CUDA version: {getattr(torch.version, 'cuda', None)}")
+print(f"  SETUPTOOLS_USE_DISTUTILS: {os.environ.get('SETUPTOOLS_USE_DISTUTILS')}")
+print(f"  distutils.core path: {getattr(distutils.core, '__file__', None)}")
 print(f"  Uni-Core source directory: {os.environ['FLUORCAST_UNIPROP_UNICORE_DIR']}")
 print("  Build isolation disabled: yes")
 print(f"  Optional CUDA extensions requested: {os.environ['FLUORCAST_UNIPROP_ENABLE_CUDA_EXT'] == '1'}")
@@ -488,7 +509,7 @@ else
     echo "Optional Uni-Core fused CUDA extensions are not requested during bootstrap."
     echo "For a compute-node CUDA-extension build, rerun after loading CUDA/nvcc with --enable-cuda-ext."
 fi
-run_cmd "$VENV_PYTHON" -m pip install --no-build-isolation "${UNICORE_INSTALL_ARGS[@]}" || fail "Uni-Core installation failed."
+run_cmd env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" -m pip install --no-build-isolation "${UNICORE_INSTALL_ARGS[@]}" || fail "Uni-Core installation failed."
 
 stage "Uni-Core import validation"
 python_here "$(cat <<'PY'
