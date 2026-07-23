@@ -5,7 +5,7 @@ performance, start full training, or build the full FluorCast geometry cache.
 
 ## Inputs
 
-- Branch: `wip/uniprop-real-checkpoint-gate`
+- Branch: `feature/uniprop-3d`
 - Starting commit for this stage: `e4c49bc`
 - Recovery tag: `uniprop-windows-gate-passed`
 - Upstream nablaColors repo: `https://github.com/AI4DD/nablaColors.git`
@@ -41,14 +41,58 @@ contains this gate.
 module purge
 module load python/3.10
 module load gcc
+module load cuda
 ```
 
-Create or activate the isolated environment:
+Create the isolated FluorCast-owned environment. This bootstrap creates only
+`.venv-uniprop`, installs PyTorch from the pip configuration exposed on Nibi,
+installs pinned Uni-Core directly from `third_party/nablacolors/Uni-Core`, and
+installs pinned Uni-Mol+ from `third_party/nablacolors/unimol_plus`. It does not
+install Conda, create `unimol_env`, download checkpoints, or run training.
 
 ```bash
-bash scripts/bootstrap_uniprop.sh --mode cuda --python python3.10
+bash scripts/bootstrap_uniprop.sh --mode cuda --python python3.10 --clean
 source .venv-uniprop/bin/activate
 ```
+
+Expected post-bootstrap import diagnostic:
+
+```bash
+python - <<'PY'
+import hashlib
+import importlib
+import subprocess
+import sys
+from pathlib import Path
+
+import torch
+import unicore
+import unimol_plus
+from unimol_plus.models.uniprop import UniPropModel
+
+upstream_dir = Path("third_party/nablacolors")
+model_module = importlib.import_module(UniPropModel.__module__)
+schema_hash = hashlib.sha256(Path("configs/uniprop/feature_schema.json").read_bytes()).hexdigest()
+print(f"Python executable: {sys.executable}")
+print(f"Python version: {sys.version.split()[0]}")
+print(f"Environment path: {sys.prefix}")
+print(f"PyTorch version: {torch.__version__}")
+print(f"Torch compiled CUDA version: {getattr(torch.version, 'cuda', None)}")
+print(f"CUDA available at runtime: {torch.cuda.is_available()}")
+print(f"Uni-Core import path: {unicore.__file__}")
+print(f"Uni-Mol+ import path: {unimol_plus.__file__}")
+print(f"Real UniProp model class: {UniPropModel.__module__}.{UniPropModel.__name__}")
+print(f"Real UniProp model source path: {model_module.__file__}")
+print(f"Pinned upstream Git commit: {subprocess.check_output(['git', '-C', str(upstream_dir), 'rev-parse', 'HEAD'], text=True).strip()}")
+print(f"Feature-schema SHA-256: {schema_hash}")
+PY
+```
+
+CUDA may report unavailable on a login node. The tiny GPU gate performs the
+actual CUDA runtime check inside the Slurm allocation. If optional Uni-Core
+fused CUDA extensions must be built with compute-node CUDA/nvcc access, rerun
+the bootstrap inside that allocation with `--enable-cuda-ext`; the default
+bootstrap still requires all UniProp imports used by this gate to succeed.
 
 Stage one checkpoint only:
 

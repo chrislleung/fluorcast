@@ -73,6 +73,11 @@ def test_bootstrap_dry_run_does_not_create_clone_or_venv(tmp_path: Path) -> None
     assert not venv.exists()
     payload = json.loads(report.read_text(encoding="utf-8"))
     assert payload["status"] == "dry-run"
+    assert "install_unicore.sh" not in result.stdout
+    assert "conda" not in result.stdout
+    assert "unimol_env" not in result.stdout
+    assert "python=3.12" not in result.stdout
+    assert "torch==2.6.*" in result.stdout
 
 
 def test_bootstrap_revision_mismatch_detection(tmp_path: Path) -> None:
@@ -97,6 +102,65 @@ def test_bootstrap_revision_mismatch_detection(tmp_path: Path) -> None:
     )
     assert result.returncode == 1
     assert "Revision mismatch" in result.stderr
+
+
+def test_cuda_bootstrap_contract_avoids_upstream_conda_installer() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert "install_unicore.sh" not in text
+    assert "conda " not in text
+    assert "conda:" not in text
+    assert "unimol_env" not in text
+    assert "python=3.12" not in text
+    assert "torch==2.6.*" in text
+    assert "UNICORE_INSTALL_ARGS=(\"$UNICORE_DIR\")" in text
+    assert 'pip install "${UNICORE_INSTALL_ARGS[@]}"' in text
+    assert "pip install -e \"$UNIMOL_PLUS_DIR\"" in text
+
+
+def test_bootstrap_completion_diagnostic_requires_real_imports() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    required = [
+        "import torch",
+        "import unicore",
+        "import unimol_plus",
+        "from unimol_plus.models.uniprop import UniPropModel",
+        "Feature-schema SHA-256 verified",
+        "Pinned upstream Git commit",
+    ]
+    for snippet in required:
+        assert snippet in text
+
+
+def test_bootstrap_does_not_download_checkpoints_or_train() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    forbidden = [
+        "zenodo.org",
+        "wget ",
+        "curl ",
+        "run_uniprop_real_checkpoint_gate.py",
+        "train_uniprop",
+        "head_pretrain",
+    ]
+    for snippet in forbidden:
+        assert snippet not in text
+
+
+def test_bootstrap_stages_stop_on_install_failures() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert 'pip install "$TORCH_SPEC"' in text
+    assert 'fail "No compatible PyTorch wheel found' in text
+    assert 'fail "PyTorch validation failed."' in text
+    assert 'fail "Uni-Core installation failed."' in text
+    assert 'fail "Uni-Mol+ installation failed."' in text
+    assert 'fail "Final UniProp import diagnostic failed."' in text
+
+
+def test_bootstrap_supports_partial_env_detection_and_clean_rebuild() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert "--clean" in text
+    assert 'rm -rf "$VENV_DIR"' in text
+    assert "Partial UniProp environment detected" in text
+    assert 'if [[ -e "$VENV_DIR" && ! -x "$VENV_PYTHON" ]]' in text
 
 
 def test_audit_missing_checkpoint_report_json_schema(tmp_path: Path) -> None:
