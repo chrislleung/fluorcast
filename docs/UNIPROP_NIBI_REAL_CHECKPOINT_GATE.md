@@ -133,8 +133,28 @@ before installation if any selected artifact is not a wheel, if `wandb` is not
 exactly `0.17.9`, if a selected package or normal dependency introduces
 `pydantic`, `pydantic-core`, or `maturin`, or if dependency resolution would
 replace the already validated NumPy or PyTorch installations. Every selected
-package is printed with its version, URL or wheel filename, and whether the URL
-appears to come from the Alliance wheelhouse.
+package is printed with its report name and version, original artifact URL,
+decoded artifact filename, parsed wheel name and version, Alliance-wheelhouse
+status, and whether the wheel version has a local label.
+
+Pip installation reports store selected artifact locations under
+`download_info.url`. URL path characters may be percent-encoded there. Alliance
+local-version wheel labels such as `+computecanada` can therefore appear in the
+raw URL as `%2Bcomputecanada`, for example
+`requests-2.34.2%2Bcomputecanada-py3-none-any.whl`. The bootstrap splits the
+artifact URL structurally, percent-decodes only the URL path with
+`urllib.parse.unquote`, extracts the final path component, and then validates
+the decoded filename with `packaging.utils.parse_wheel_filename()`. That parser
+remains the authoritative wheel check; the bootstrap does not rely on raw
+`.whl` suffix checks. Parsed wheel names are compared with pip report metadata
+using `packaging.utils.canonicalize_name`, and parsed wheel versions are
+compared with report metadata using `packaging.version.Version`, so valid local
+versions such as `2.34.2+computecanada` are accepted.
+
+Valid Alliance wheels and PyPI wheels are both accepted. The runtime dependency
+phase still requires every selected artifact to be a valid wheel, and actual
+source distributions such as `.tar.gz`, `.zip`, and `.tar.bz2` remain
+prohibited.
 
 The `wandb==0.17.9` pin is a compatibility policy, not a scientific model
 dependency. Normal `wandb 0.17.9` supports Python 3.10 and does not require

@@ -438,23 +438,23 @@ else
         rm -f "$UNICORE_RUNTIME_REPORT"
         fail "No compatible binary candidate exists for one or more Uni-Core runtime dependencies."
     fi
-    "$VENV_PYTHON" - "$UNICORE_RUNTIME_REPORT" <<'PY'
+    PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PYTHON" - "$UNICORE_RUNTIME_REPORT" <<'PY'
 import json
 import os
 import sys
 from pathlib import Path
-from urllib.parse import urlparse
-from packaging.markers import default_environment
 from packaging.requirements import Requirement
-from packaging.utils import InvalidWheelFilename, parse_wheel_filename
-from packaging.version import Version
+from chemfluor.uniprop.resolver_report import (
+    validate_unicore_runtime_report_item,
+    normalized_package_name,
+)
 
 FORBIDDEN = {"pydantic", "pydantic-core", "pydantic_core", "maturin"}
 REPLACE_FORBIDDEN = {"numpy", "torch"}
 REQUIRED_WANDB = "0.17.9"
 
 def normalized(name: str) -> str:
-    return name.replace("_", "-").lower()
+    return normalized_package_name(name)
 
 requirements_path = Path(os.environ["FLUORCAST_UNIPROP_RUNTIME_REQUIREMENTS"])
 requirements = [
@@ -474,33 +474,20 @@ if not items:
 for item in items:
     metadata = item.get("metadata", {})
     raw_name = metadata.get("name", "")
-    name = normalized(raw_name)
-    version = metadata.get("version", "")
-    download = item.get("download_info", {})
-    url = download.get("url", "")
-    filename = Path(urlparse(url).path).name
-    if name in REPLACE_FORBIDDEN:
-        raise SystemExit(f"Runtime dependency resolution would replace protected package {raw_name}.")
-    if name in FORBIDDEN:
-        raise SystemExit(f"Runtime dependency resolution selected forbidden package {raw_name}.")
-    if normalized(raw_name) == "wandb" and Version(version).base_version != REQUIRED_WANDB:
-        raise SystemExit(f"Runtime dependency resolution selected wandb {version}; expected {REQUIRED_WANDB}.")
     try:
-        parse_wheel_filename(filename)
-    except InvalidWheelFilename as exc:
-        raise SystemExit(f"Runtime dependency resolution selected a source distribution for {raw_name}: {filename or url}") from exc
-    requires_dist = metadata.get("requires_dist") or []
-    for requirement_text in requires_dist:
-        requirement = Requirement(requirement_text)
-        marker_environment = default_environment()
-        marker_environment["extra"] = ""
-        if requirement.marker is not None and not requirement.marker.evaluate(marker_environment):
-            continue
-        dependency = normalized(requirement.name)
-        if dependency in FORBIDDEN:
-            raise SystemExit(f"Runtime dependency {raw_name} declares forbidden dependency {requirement_text}.")
-    alliance = any(marker in url.lower() for marker in ("computecanada", "alliancecan", "wheelhouse"))
-    print(f"  {raw_name} {version} | {url or filename or 'already installed'} | alliance_wheelhouse={alliance}")
+        selected = validate_unicore_runtime_report_item(item, required_wandb=REQUIRED_WANDB)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(
+        f"  {selected.report_name} {selected.report_version} | "
+        f"original_url={selected.original_url} | "
+        f"decoded_filename={selected.decoded_filename} | "
+        f"artifact_type=wheel | "
+        f"parsed_wheel_name={selected.parsed_name} | "
+        f"parsed_wheel_version={selected.parsed_version} | "
+        f"alliance_wheelhouse={selected.alliance_wheelhouse} | "
+        f"wheel_has_local_version={selected.has_local_version}"
+    )
 print("Validated wheel-only runtime dependency dry-run report.")
 PY
     rm -f "$UNICORE_RUNTIME_REPORT"

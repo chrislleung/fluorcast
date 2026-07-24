@@ -13,6 +13,7 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BOOTSTRAP = PROJECT_ROOT / "scripts" / "bootstrap_uniprop.sh"
 AUDIT = PROJECT_ROOT / "scripts" / "audit_uniprop_environment.py"
+RESOLVER_REPORT = PROJECT_ROOT / "src" / "chemfluor" / "uniprop" / "resolver_report.py"
 REVISION = PROJECT_ROOT / "third_party" / "nablacolors.REVISION"
 MANIFEST = PROJECT_ROOT / "configs" / "uniprop" / "checkpoint_manifest.json"
 BUILD_ISOLATION_FAILURE = (
@@ -29,6 +30,9 @@ PYDANTIC_CORE_MATURIN_FAILURE = (
 )
 WANDB_PYDANTIC_RESOLUTION_FAILURE = (
     PROJECT_ROOT / "tests" / "fixtures" / "uniprop_wandb_pydantic_resolution_failure.txt"
+)
+ENCODED_WHEEL_FALSE_FAILURE = (
+    PROJECT_ROOT / "tests" / "fixtures" / "uniprop_encoded_wheel_false_failure.txt"
 )
 UNICORE_RUNTIME_REQUIREMENTS = (
     PROJECT_ROOT / "configs" / "uniprop" / "unicore_runtime_requirements.txt"
@@ -340,19 +344,47 @@ def test_unicore_runtime_dependency_install_is_wheel_only_and_isolated_normally(
 
 def test_unicore_runtime_report_validation_rejects_bad_resolution() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
+    helper = RESOLVER_REPORT.read_text(encoding="utf-8")
     preflight = text.index('stage "Uni-Core runtime dependency resolver preflight"')
     install = text.index('stage "Uni-Core runtime dependencies"')
     block = text[preflight:install]
-    assert "parse_wheel_filename(filename)" in block
-    assert "selected a source distribution" in block
+    assert "validate_unicore_runtime_report_item" in block
+    assert "decoded_filename=" in block
+    assert "original_url=" in block
+    assert "artifact_type=wheel" in block
+    assert "parsed_wheel_name=" in block
+    assert "parsed_wheel_version=" in block
+    assert "wheel_has_local_version=" in block
     assert 'str(wandb_requirements[0].specifier) != "==0.17.9"' in block
-    assert "selected wandb {version}; expected" in block
+    assert "selected wandb {version}; expected" in helper
     assert 'FORBIDDEN = {"pydantic", "pydantic-core", "pydantic_core", "maturin"}' in block
     assert 'REPLACE_FORBIDDEN = {"numpy", "torch"}' in block
-    assert "would replace protected package" in block
-    assert 'marker_environment["extra"] = ""' in block
-    assert "declares forbidden dependency" in block
+    assert "would replace protected package" in helper
+    assert 'marker_environment["extra"] = ""' in helper
+    assert "declares forbidden dependency" in helper
     assert "alliance_wheelhouse=" in block
+
+
+def test_runtime_dependency_install_remains_wheel_only_after_report_validation() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    runtime_install = text.index('stage "Uni-Core runtime dependencies"')
+    build_diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
+    block = text[runtime_install:build_diagnostic]
+    assert 'pip install --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"' in block
+
+
+def test_local_unicore_still_uses_no_build_isolation_and_no_deps() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    install_stage = text.index('stage "Uni-Core direct install"')
+    post_install = text.index('stage "Uni-Core post-install validation"')
+    block = text[install_stage:post_install]
+    assert "--no-build-isolation --no-deps" in block
+
+
+def test_encoded_wheel_false_failure_fixture_matches_real_regression() -> None:
+    fixture = ENCODED_WHEEL_FALSE_FAILURE.read_text(encoding="utf-8")
+    assert "Runtime dependency resolution selected a source distribution for requests:" in fixture
+    assert "requests-2.34.2%2Bcomputecanada-py3-none-any.whl" in fixture
 
 
 def test_wandb_0179_policy_avoids_normal_pydantic_dependency() -> None:
