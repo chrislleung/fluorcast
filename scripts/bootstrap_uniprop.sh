@@ -198,6 +198,7 @@ fi
 
 UNICORE_DIR="$UPSTREAM_DIR/Uni-Core"
 UNIMOL_PLUS_DIR="$UPSTREAM_DIR/unimol_plus"
+UNICORE_RUNTIME_REQUIREMENTS="configs/uniprop/unicore_runtime_requirements.txt"
 VENV_PYTHON="$VENV_DIR/bin/python"
 
 echo "UniProp bootstrap mode: $MODE"
@@ -207,9 +208,11 @@ echo "Upstream directory: $UPSTREAM_DIR"
 echo "Virtual environment: $VENV_DIR"
 echo "PyTorch requirement: $TORCH_SPEC"
 echo "NumPy requirement: $NUMPY_SPEC"
+echo "Uni-Core runtime requirements: $UNICORE_RUNTIME_REQUIREMENTS"
 export FLUORCAST_UNIPROP_BOOTSTRAP_MODE="$MODE"
 export FLUORCAST_UNIPROP_TORCH_SPEC="$TORCH_SPEC"
 export FLUORCAST_UNIPROP_NUMPY_REQUIREMENT="$NUMPY_SPEC"
+export FLUORCAST_UNIPROP_RUNTIME_REQUIREMENTS="$UNICORE_RUNTIME_REQUIREMENTS"
 
 stage "Pinned upstream checkout"
 if [[ -d "$UPSTREAM_DIR" ]]; then
@@ -243,6 +246,9 @@ if [[ "$DRY_RUN" -eq 0 && ! -d "$UNICORE_DIR" ]]; then
 fi
 if [[ "$DRY_RUN" -eq 0 && ! -d "$UNIMOL_PLUS_DIR" ]]; then
     fail "Uni-Mol+ directory is missing from pinned checkout: $UNIMOL_PLUS_DIR"
+fi
+if [[ "$DRY_RUN" -eq 0 && ! -f "$UNICORE_RUNTIME_REQUIREMENTS" ]]; then
+    fail "Uni-Core runtime requirements file is missing: $UNICORE_RUNTIME_REQUIREMENTS"
 fi
 
 stage "Python 3.10 virtual environment"
@@ -423,6 +429,86 @@ if os.environ.get("FLUORCAST_UNIPROP_BOOTSTRAP_MODE") == "cuda" and getattr(torc
 PY
 )" || fail "PyTorch validation failed."
 
+stage "Uni-Core runtime dependency resolver preflight"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    run_cmd "$VENV_PYTHON" -m pip install --dry-run --report "<unicore-runtime-report>" --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"
+else
+    UNICORE_RUNTIME_REPORT="$(mktemp)"
+    if ! "$VENV_PYTHON" -m pip install --dry-run --report "$UNICORE_RUNTIME_REPORT" --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"; then
+        rm -f "$UNICORE_RUNTIME_REPORT"
+        fail "No compatible binary candidate exists for one or more Uni-Core runtime dependencies."
+    fi
+    "$VENV_PYTHON" - "$UNICORE_RUNTIME_REPORT" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+from urllib.parse import urlparse
+from packaging.markers import default_environment
+from packaging.requirements import Requirement
+from packaging.utils import InvalidWheelFilename, parse_wheel_filename
+from packaging.version import Version
+
+FORBIDDEN = {"pydantic", "pydantic-core", "pydantic_core", "maturin"}
+REPLACE_FORBIDDEN = {"numpy", "torch"}
+REQUIRED_WANDB = "0.17.9"
+
+def normalized(name: str) -> str:
+    return name.replace("_", "-").lower()
+
+requirements_path = Path(os.environ["FLUORCAST_UNIPROP_RUNTIME_REQUIREMENTS"])
+requirements = [
+    Requirement(line.strip())
+    for line in requirements_path.read_text(encoding="utf-8").splitlines()
+    if line.strip() and not line.strip().startswith("#")
+]
+wandb_requirements = [req for req in requirements if normalized(req.name) == "wandb"]
+if len(wandb_requirements) != 1 or str(wandb_requirements[0].specifier) != "==0.17.9":
+    raise SystemExit("Uni-Core runtime requirements must pin wandb==0.17.9.")
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+items = payload.get("install", [])
+print("Uni-Core runtime dependency dry-run selection:")
+if not items:
+    print("  All runtime dependencies are already installed; validating installed metadata after install.")
+for item in items:
+    metadata = item.get("metadata", {})
+    raw_name = metadata.get("name", "")
+    name = normalized(raw_name)
+    version = metadata.get("version", "")
+    download = item.get("download_info", {})
+    url = download.get("url", "")
+    filename = Path(urlparse(url).path).name
+    if name in REPLACE_FORBIDDEN:
+        raise SystemExit(f"Runtime dependency resolution would replace protected package {raw_name}.")
+    if name in FORBIDDEN:
+        raise SystemExit(f"Runtime dependency resolution selected forbidden package {raw_name}.")
+    if normalized(raw_name) == "wandb" and Version(version).base_version != REQUIRED_WANDB:
+        raise SystemExit(f"Runtime dependency resolution selected wandb {version}; expected {REQUIRED_WANDB}.")
+    try:
+        parse_wheel_filename(filename)
+    except InvalidWheelFilename as exc:
+        raise SystemExit(f"Runtime dependency resolution selected a source distribution for {raw_name}: {filename or url}") from exc
+    requires_dist = metadata.get("requires_dist") or []
+    for requirement_text in requires_dist:
+        requirement = Requirement(requirement_text)
+        marker_environment = default_environment()
+        marker_environment["extra"] = ""
+        if requirement.marker is not None and not requirement.marker.evaluate(marker_environment):
+            continue
+        dependency = normalized(requirement.name)
+        if dependency in FORBIDDEN:
+            raise SystemExit(f"Runtime dependency {raw_name} declares forbidden dependency {requirement_text}.")
+    alliance = any(marker in url.lower() for marker in ("computecanada", "alliancecan", "wheelhouse"))
+    print(f"  {raw_name} {version} | {url or filename or 'already installed'} | alliance_wheelhouse={alliance}")
+print("Validated wheel-only runtime dependency dry-run report.")
+PY
+    rm -f "$UNICORE_RUNTIME_REPORT"
+fi
+
+stage "Uni-Core runtime dependencies"
+run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS" || fail "Uni-Core runtime dependency installation failed."
+
 stage "Uni-Core build prerequisite diagnostic"
 export FLUORCAST_UNIPROP_UNICORE_DIR="$UNICORE_DIR"
 export FLUORCAST_UNIPROP_ENABLE_CUDA_EXT="$ENABLE_CUDA_EXT"
@@ -509,11 +595,49 @@ else
     echo "Optional Uni-Core fused CUDA extensions are not requested during bootstrap."
     echo "For a compute-node CUDA-extension build, rerun after loading CUDA/nvcc with --enable-cuda-ext."
 fi
-run_cmd env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" -m pip install --no-build-isolation "${UNICORE_INSTALL_ARGS[@]}" || fail "Uni-Core installation failed."
+run_cmd env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" -m pip install --no-build-isolation --no-deps "${UNICORE_INSTALL_ARGS[@]}" || fail "Uni-Core installation failed."
 
-stage "Uni-Core import validation"
+stage "Uni-Core post-install validation"
+run_cmd "$VENV_PYTHON" -m pip check || fail "Uni-Core pip check failed."
 python_here "$(cat <<'PY'
+import importlib
 import importlib.util
+from importlib import metadata
+from pathlib import Path
+
+runtime_modules = [
+    "lmdb",
+    "tqdm",
+    "ml_collections",
+    "scipy",
+    "tensorboardX",
+    "tokenizers",
+    "wandb",
+    "torch",
+    "numpy",
+    "unicore",
+]
+for module_name in runtime_modules:
+    module = importlib.import_module(module_name)
+    distribution_name = {
+        "ml_collections": "ml-collections",
+        "tensorboardX": "tensorboardX",
+    }.get(module_name, module_name)
+    version = metadata.version(distribution_name)
+    print(f"{module_name}: version={version} path={getattr(module, '__file__', None)}")
+
+import wandb
+if wandb.__version__ != "0.17.9":
+    raise SystemExit(f"wandb version must be 0.17.9, got {wandb.__version__}")
+
+for forbidden in ("pydantic", "pydantic-core", "maturin"):
+    try:
+        version = metadata.version(forbidden)
+    except metadata.PackageNotFoundError:
+        print(f"{forbidden}: not installed")
+    else:
+        raise SystemExit(f"Forbidden runtime/build package is installed: {forbidden} {version}")
+
 import unicore
 optional = [
     "unicore_fused_rounding",

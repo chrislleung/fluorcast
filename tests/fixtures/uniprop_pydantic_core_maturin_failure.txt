@@ -1,0 +1,8 @@
+Collecting pydantic-core==2.46.4
+  Downloading pydantic_core-2.46.4.tar.gz
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Getting requirements to build wheel: started
+  Getting requirements to build wheel: finished with status 'error'
+  BackendUnavailable: Cannot import 'maturin'
+ERROR: Uni-Core installation failed.

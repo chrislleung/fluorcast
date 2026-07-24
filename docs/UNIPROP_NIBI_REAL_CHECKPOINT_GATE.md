@@ -46,10 +46,13 @@ module load cuda
 
 Create the isolated FluorCast-owned environment. This bootstrap creates only
 `.venv-uniprop`, installs PyTorch from the pip configuration exposed on Nibi,
-installs Alliance-compatible NumPy from the same configuration,
-installs pinned Uni-Core directly from `third_party/nablacolors/Uni-Core`, and
-installs pinned Uni-Mol+ from `third_party/nablacolors/unimol_plus`. It does not
-install Conda, create `unimol_env`, download checkpoints, or run training.
+installs Alliance-compatible NumPy from the same configuration, installs
+Uni-Core runtime dependencies from
+`configs/uniprop/unicore_runtime_requirements.txt`, installs pinned Uni-Core
+directly from `third_party/nablacolors/Uni-Core`, and installs pinned Uni-Mol+
+from `third_party/nablacolors/unimol_plus`. It does not install Conda, create
+`unimol_env`, download checkpoints, run training, or compile arbitrary Rust
+source packages on the login node.
 
 ```bash
 bash scripts/bootstrap_uniprop.sh --mode cuda --python python3.10 --clean
@@ -97,10 +100,51 @@ stdlib `distutils` available, the Uni-Core compatibility probe and Uni-Core pip
 build subprocess are run with the official scoped setting
 `SETUPTOOLS_USE_DISTUTILS=stdlib`. This fix is distinct from disabling pip build
 isolation: `--no-build-isolation` makes the already-installed PyTorch visible to
-the build, while `SETUPTOOLS_USE_DISTUTILS=stdlib` prevents the setuptools
-vendored-distutils collision after PyTorch has been imported. Do not substitute
-Python 3.12 for this gate; Python 3.12 removed stdlib `distutils`, so this
-compatibility mode is not available there.
+the local Uni-Core build, while `SETUPTOOLS_USE_DISTUTILS=stdlib` prevents the
+setuptools vendored-distutils collision after PyTorch has been imported. Do not
+substitute Python 3.12 for this gate; Python 3.12 removed stdlib `distutils`, so
+this compatibility mode is not available there.
+
+That exception is intentionally scoped only to the local Uni-Core source
+package. Uni-Core declares normal runtime dependencies including `lmdb`, `tqdm`,
+`ml_collections`, `scipy`, `tensorboardX`, `tokenizers`, and `wandb`. Those
+third-party packages are resolved and installed in a separate phase before
+Uni-Core, using pip's normal build-isolation behavior and binary-only selection:
+
+```bash
+.venv-uniprop/bin/python -m pip install \
+  --only-binary=:all: \
+  -r configs/uniprop/unicore_runtime_requirements.txt
+```
+
+Before running that install, the bootstrap runs a structured pip resolver
+preflight:
+
+```bash
+.venv-uniprop/bin/python -m pip install \
+  --dry-run \
+  --report <temporary-runtime-report.json> \
+  --only-binary=:all: \
+  -r configs/uniprop/unicore_runtime_requirements.txt
+```
+
+The bootstrap parses the JSON report, not ordinary pip console text. It fails
+before installation if any selected artifact is not a wheel, if `wandb` is not
+exactly `0.17.9`, if a selected package or normal dependency introduces
+`pydantic`, `pydantic-core`, or `maturin`, or if dependency resolution would
+replace the already validated NumPy or PyTorch installations. Every selected
+package is printed with its version, URL or wheel filename, and whether the URL
+appears to come from the Alliance wheelhouse.
+
+The `wandb==0.17.9` pin is a compatibility policy, not a scientific model
+dependency. Normal `wandb 0.17.9` supports Python 3.10 and does not require
+Pydantic. The bootstrap does not install the optional `wandb[launch]` extra,
+because that path can introduce Pydantic. Pydantic, `pydantic-core`, Maturin,
+Rust, and Cargo are not required for the UniProp checkpoint gate. If a newer
+unconstrained `wandb` release causes pip to select `pydantic-core` as a source
+distribution, pip may try to import Maturin or build Rust code. That is
+prohibited on the Nibi login-node bootstrap path; the repair is to keep the
+runtime dependency phase wheel-only and pinned, not to install Rust build tools.
 
 The effective Uni-Core install command is:
 
@@ -108,8 +152,26 @@ The effective Uni-Core install command is:
 env SETUPTOOLS_USE_DISTUTILS=stdlib \
   .venv-uniprop/bin/python -m pip install \
   --no-build-isolation \
+  --no-deps \
   third_party/nablacolors/Uni-Core
 ```
+
+`--no-deps` is used only here, after the complete Uni-Core runtime dependency
+set has already passed the wheel-only dry-run report validation and install.
+`--only-binary=:all:` is not applied to this local source path.
+
+After Uni-Core installs, the bootstrap runs:
+
+```bash
+.venv-uniprop/bin/python -m pip check
+```
+
+It then imports and prints versions and import paths for `lmdb`, `tqdm`,
+`ml_collections`, `scipy`, `tensorboardX`, `tokenizers`, `wandb`, `torch`,
+`numpy`, and `unicore`; asserts `wandb.__version__ == "0.17.9"`; and verifies
+from package metadata that `pydantic`, `pydantic-core`, and `maturin` are not
+installed. Uni-Mol+ installation and the final `UniPropModel` import happen
+only after these checks pass.
 
 The bootstrap first installs build prerequisites into `.venv-uniprop`, including
 `setuptools`, `wheel`, `packaging`, Alliance-compatible `numpy==2.2.2`, and the

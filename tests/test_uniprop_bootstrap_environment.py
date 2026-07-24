@@ -24,13 +24,37 @@ NUMPY_UNAVAILABLE_FAILURE = (
 DISTUTILS_ASSERTION_FAILURE = (
     PROJECT_ROOT / "tests" / "fixtures" / "uniprop_distutils_hack_assertion_failure.txt"
 )
+PYDANTIC_CORE_MATURIN_FAILURE = (
+    PROJECT_ROOT / "tests" / "fixtures" / "uniprop_pydantic_core_maturin_failure.txt"
+)
+WANDB_PYDANTIC_RESOLUTION_FAILURE = (
+    PROJECT_ROOT / "tests" / "fixtures" / "uniprop_wandb_pydantic_resolution_failure.txt"
+)
+UNICORE_RUNTIME_REQUIREMENTS = (
+    PROJECT_ROOT / "configs" / "uniprop" / "unicore_runtime_requirements.txt"
+)
 
 
 def _bash() -> str:
     bash = shutil.which("bash")
+    if bash is not None and os.name == "nt" and "WindowsApps" in bash:
+        for candidate in _git_bash_candidates():
+            if candidate.exists():
+                return str(candidate)
     if bash is None:
         pytest.skip("bash is not available")
     return bash
+
+
+def _git_bash_candidates() -> list[Path]:
+    return [
+        Path(r"C:\Program Files\Git\bin\bash.exe"),
+        Path(r"C:\Program Files\Git\usr\bin\bash.exe"),
+    ]
+
+
+def _has_git_bash() -> bool:
+    return any(candidate.exists() for candidate in _git_bash_candidates())
 
 
 def _bash_path(path: Path) -> str:
@@ -39,6 +63,8 @@ def _bash_path(path: Path) -> str:
     resolved = path.resolve()
     drive = resolved.drive.rstrip(":").lower()
     rest = resolved.as_posix().split(":", 1)[1]
+    if _has_git_bash():
+        return f"/{drive}{rest}"
     return f"/mnt/{drive}{rest}"
 
 
@@ -49,6 +75,13 @@ def _bash_cmd(*args: str | Path) -> list[str]:
         wsl = shutil.which("wsl")
         if wsl is None:
             pytest.skip("WSL bash shim is present but wsl.exe is not available")
+        distro_check = subprocess.run(
+            [wsl, "--list", "--quiet"],
+            capture_output=True,
+            text=True,
+        )
+        if distro_check.returncode != 0 or not distro_check.stdout.strip():
+            pytest.skip("WSL bash shim is present but no WSL distribution is installed")
         return [wsl, "-e", "bash", *converted]
     return [bash, *converted]
 
@@ -88,6 +121,8 @@ def test_bootstrap_dry_run_does_not_create_clone_or_venv(tmp_path: Path) -> None
     assert "python=3.12" not in result.stdout
     assert "torch==2.6.*" in result.stdout
     assert "numpy==2.2.2" in result.stdout
+    assert "unicore_runtime_requirements.txt" in result.stdout
+    assert "--only-binary=:all:" in result.stdout
     assert "numpy==2.2.6" not in BOOTSTRAP.read_text(encoding="utf-8")
 
 
@@ -127,9 +162,10 @@ def test_cuda_bootstrap_contract_avoids_upstream_conda_installer() -> None:
     assert "numpy==2.2.6" not in text
     assert "FLUORCAST_UNIPROP_NUMPY_REQUIREMENT" in text
     assert "UNICORE_INSTALL_ARGS=(\"$UNICORE_DIR\")" in text
+    assert "UNICORE_RUNTIME_REQUIREMENTS=\"configs/uniprop/unicore_runtime_requirements.txt\"" in text
     unicore_install = (
         'env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" -m pip install '
-        '--no-build-isolation "${UNICORE_INSTALL_ARGS[@]}"'
+        '--no-build-isolation --no-deps "${UNICORE_INSTALL_ARGS[@]}"'
     )
     assert unicore_install in text
     assert "pip install -e \"$UNIMOL_PLUS_DIR\"" in text
@@ -142,6 +178,7 @@ def test_bootstrap_completion_diagnostic_requires_real_imports() -> None:
         "import numpy",
         "import unicore",
         "import unimol_plus",
+        "import wandb",
         "from unimol_plus.models.uniprop import UniPropModel",
         "Feature-schema SHA-256 verified",
         "Pinned upstream Git commit",
@@ -172,7 +209,10 @@ def test_bootstrap_stages_stop_on_install_failures() -> None:
     assert 'fail "Uni-Core build prerequisites are unavailable."' in text
     assert 'fail "No compatible PyTorch wheel found' in text
     assert 'fail "PyTorch validation failed."' in text
+    assert 'fail "No compatible binary candidate exists for one or more Uni-Core runtime dependencies."' in text
+    assert 'fail "Uni-Core runtime dependency installation failed."' in text
     assert 'fail "Uni-Core installation failed."' in text
+    assert 'fail "Uni-Core pip check failed."' in text
     assert 'fail "Uni-Mol+ installation failed."' in text
     assert 'fail "Final UniProp import diagnostic failed."' in text
 
@@ -186,6 +226,7 @@ def test_bootstrap_supports_partial_env_detection_and_clean_rebuild() -> None:
 
 
 def test_cuda_mode_is_preserved_when_explicitly_supplied(tmp_path: Path) -> None:
+    upstream = tmp_path / "nablacolors"
     report = tmp_path / "bootstrap.json"
     result = subprocess.run(
         [
@@ -193,6 +234,8 @@ def test_cuda_mode_is_preserved_when_explicitly_supplied(tmp_path: Path) -> None
             "--dry-run",
             "--mode",
             "cuda",
+            "--upstream-dir",
+            _bash_path(upstream),
             "--json-output",
             _bash_path(report),
         ],
@@ -257,12 +300,76 @@ def test_cuda_path_rejects_cpu_only_torch() -> None:
     assert "getattr(torch.version, \"cuda\", None) is None" in text
 
 
+def test_unicore_runtime_requirements_are_explicit_and_do_not_reinstall_torch_numpy() -> None:
+    requirements = UNICORE_RUNTIME_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+    assert requirements == [
+        "lmdb",
+        "tqdm",
+        "ml_collections",
+        "scipy",
+        "tensorboardX",
+        "tokenizers",
+        "wandb==0.17.9",
+    ]
+    assert "torch" not in "\n".join(requirements).lower()
+    assert "numpy" not in "\n".join(requirements).lower()
+
+
+def test_unicore_runtime_dependencies_are_installed_before_local_unicore() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    runtime_preflight = text.index('stage "Uni-Core runtime dependency resolver preflight"')
+    runtime_install = text.index('stage "Uni-Core runtime dependencies"')
+    local_install = text.index('stage "Uni-Core direct install"')
+    assert runtime_preflight < runtime_install < local_install
+
+
+def test_unicore_runtime_dependency_install_is_wheel_only_and_isolated_normally() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    runtime_preflight = text.index('stage "Uni-Core runtime dependency resolver preflight"')
+    runtime_install = text.index('stage "Uni-Core runtime dependencies"')
+    diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
+    local_install = text.index('stage "Uni-Core direct install"')
+    resolver_block = text[runtime_preflight:runtime_install]
+    install_block = text[runtime_install:diagnostic]
+    assert "--dry-run --report" in resolver_block
+    assert "--only-binary=:all:" in resolver_block
+    assert "--only-binary=:all:" in install_block
+    assert "--no-build-isolation" not in resolver_block + install_block
+    assert "SETUPTOOLS_USE_DISTUTILS" not in resolver_block + install_block
+
+
+def test_unicore_runtime_report_validation_rejects_bad_resolution() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    preflight = text.index('stage "Uni-Core runtime dependency resolver preflight"')
+    install = text.index('stage "Uni-Core runtime dependencies"')
+    block = text[preflight:install]
+    assert "parse_wheel_filename(filename)" in block
+    assert "selected a source distribution" in block
+    assert 'str(wandb_requirements[0].specifier) != "==0.17.9"' in block
+    assert "selected wandb {version}; expected" in block
+    assert 'FORBIDDEN = {"pydantic", "pydantic-core", "pydantic_core", "maturin"}' in block
+    assert 'REPLACE_FORBIDDEN = {"numpy", "torch"}' in block
+    assert "would replace protected package" in block
+    assert 'marker_environment["extra"] = ""' in block
+    assert "declares forbidden dependency" in block
+    assert "alliance_wheelhouse=" in block
+
+
+def test_wandb_0179_policy_avoids_normal_pydantic_dependency() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    requirements = UNICORE_RUNTIME_REQUIREMENTS.read_text(encoding="utf-8")
+    assert "wandb==0.17.9" in requirements
+    assert "wandb.__version__ != \"0.17.9\"" in text
+    assert "launch" not in requirements
+    assert "pydantic" not in requirements.lower()
+
+
 def test_unicore_build_uses_environment_torch_without_isolation() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
     diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
     install = text.index(
         'env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" -m pip install '
-        '--no-build-isolation "${UNICORE_INSTALL_ARGS[@]}"'
+        '--no-build-isolation --no-deps "${UNICORE_INSTALL_ARGS[@]}"'
     )
     assert diagnostic < install
     assert "import torch" in text[diagnostic:install]
@@ -306,11 +413,11 @@ def test_unicore_probe_represents_upstream_torch_then_setuptools_order() -> None
 def test_unicore_install_receives_scoped_stdlib_distutils_env() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
     install_stage = text.index('stage "Uni-Core direct install"')
-    import_validation = text.index('stage "Uni-Core import validation"')
+    import_validation = text.index('stage "Uni-Core post-install validation"')
     block = text[install_stage:import_validation]
     unicore_install = (
         'run_cmd env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" '
-        '-m pip install --no-build-isolation "${UNICORE_INSTALL_ARGS[@]}"'
+        '-m pip install --no-build-isolation --no-deps "${UNICORE_INSTALL_ARGS[@]}"'
     )
     assert unicore_install in block
 
@@ -327,10 +434,16 @@ def test_setuptools_distutils_setting_is_scoped_to_unicore_subprocesses() -> Non
 
 def test_unicore_failure_prevents_unimol_plus_attempt() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
+    dependency_resolution = text.index('fail "No compatible binary candidate exists for one or more Uni-Core runtime dependencies."')
+    dependency_install = text.index('fail "Uni-Core runtime dependency installation failed."')
+    pip_check = text.index('fail "Uni-Core pip check failed."')
     unicore_install = text.index('fail "Uni-Core installation failed."')
     unicore_import = text.index('fail "Uni-Core required imports are unavailable."')
     unimol_install = text.index('stage "Uni-Mol+ direct install"')
+    assert dependency_resolution < unimol_install
+    assert dependency_install < unimol_install
     assert unicore_install < unimol_install
+    assert pip_check < unimol_install
     assert unicore_import < unimol_install
 
 
@@ -357,6 +470,18 @@ def test_numpy_unavailable_failure_fixture_matches_real_regression() -> None:
     fixture = NUMPY_UNAVAILABLE_FAILURE.read_text(encoding="utf-8")
     assert "Could not find a version that satisfies the requirement numpy==2.2.6" in fixture
     assert "No matching distribution found for numpy==2.2.6" in fixture
+
+
+def test_pydantic_core_maturin_failure_fixture_matches_real_regression() -> None:
+    fixture = PYDANTIC_CORE_MATURIN_FAILURE.read_text(encoding="utf-8")
+    assert "pydantic_core-2.46.4.tar.gz" in fixture
+    assert "BackendUnavailable: Cannot import 'maturin'" in fixture
+
+
+def test_wandb_pydantic_resolution_fixture_matches_real_regression() -> None:
+    fixture = WANDB_PYDANTIC_RESOLUTION_FAILURE.read_text(encoding="utf-8")
+    assert "wandb-0.27.2+computecanada" in fixture
+    assert "pydantic-2.13.4+computecanada" in fixture
 
 
 def test_optional_cuda_extension_toolkit_guard_is_strict_only_when_requested() -> None:

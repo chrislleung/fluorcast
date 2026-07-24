@@ -1,0 +1,7 @@
+lmdb
+tqdm
+ml_collections
+scipy
+tensorboardX
+tokenizers
+wandb==0.17.9

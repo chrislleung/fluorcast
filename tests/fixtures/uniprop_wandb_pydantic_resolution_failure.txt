@@ -1,0 +1,4 @@
+Collecting wandb
+  Downloading wandb-0.27.2+computecanada-py3-none-any.whl
+Collecting pydantic
+  Downloading pydantic-2.13.4+computecanada-py3-none-any.whl
