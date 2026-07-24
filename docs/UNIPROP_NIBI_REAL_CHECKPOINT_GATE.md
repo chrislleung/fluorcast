@@ -6,7 +6,7 @@ performance, start full training, or build the full FluorCast geometry cache.
 ## Inputs
 
 - Branch: `feature/uniprop-3d`
-- Starting commit for this stage: `e4c49bc`
+- Starting commit for this stage: `bcdb1fc`
 - Recovery tag: `uniprop-windows-gate-passed`
 - Upstream nablaColors repo: `https://github.com/AI4DD/nablaColors.git`
 - Upstream commit: `39095389c0a4ecb47872ef74d00b8d13597939c8`
@@ -34,7 +34,7 @@ git checkout feature/uniprop-3d
 git rev-parse --short HEAD
 ```
 
-The starting point for this stage should be `e4c49bc`, or a later commit that
+The starting point for this stage should be `bcdb1fc`, or a later commit that
 contains this gate.
 
 ```bash
@@ -69,6 +69,16 @@ may satisfy that with a local distributor wheel such as
 allowing that local suffix. The requirement is intentionally not written with
 `+computecanada`, so standard pip version matching can select the Alliance wheel
 without making the script unusable outside that wheelhouse.
+
+The exact CUDA bootstrap command for this Nibi repair is:
+
+```bash
+module purge
+module load python/3.10
+module load gcc
+module load cuda
+bash scripts/bootstrap_uniprop.sh --mode cuda --python python3.10 --clean
+```
 
 Uni-Core's `setup.py` imports `torch` while pip is preparing the build, before
 the package itself is installed. PyTorch is already installed in `.venv-uniprop`,
@@ -155,6 +165,60 @@ Valid Alliance wheels and PyPI wheels are both accepted. The runtime dependency
 phase still requires every selected artifact to be a valid wheel, and actual
 source distributions such as `.tar.gz`, `.zip`, and `.tar.bz2` remain
 prohibited.
+
+LMDB is the one runtime dependency that must be more than merely wheel-shaped.
+The verified Nibi survey showed that pip previously selected
+`lmdb-1.7.5-py3-none-any.whl`; that wheel installed, but it did not contain the
+native CPython module and `import lmdb.cpython` failed. LMDB then fell back to
+CFFI and attempted to compile against host headers, ending with
+`fatal error: lmdb.h: No such file or directory` and `cffi.VerificationError`.
+That host-header compilation path is prohibited for this bootstrap.
+
+The Nibi-available `1.7.1`, `1.7.2`, `1.7.3`, and `1.7.5` LMDB wheels are all
+`py3-none-any` universal wheels and are rejected. Nibi also cannot resolve
+`lmdb==2.3.0`, so this environment must not request it. The usable surveyed
+candidate is:
+
+```text
+lmdb-1.4.1+computecanada-cp310-cp310-linux_x86_64.whl
+```
+
+It contains:
+
+```text
+lmdb/cpython.cpython-310-x86_64-linux-gnu.so
+```
+
+`configs/uniprop/unicore_runtime_requirements.txt` therefore pins the portable
+public requirement `lmdb==1.4.1`. On Alliance, pip may satisfy that with the
+local-version distribution `1.4.1+computecanada`; outside Alliance, the policy
+does not require a local suffix. The resolver preflight validates that the
+selected LMDB artifact has public/base version `1.4.1`, canonical package name
+`lmdb`, valid wheel metadata, tags intersecting `packaging.tags.sys_tags()`, a
+CPython 3.10 implementation tag, a CPython 3.10 ABI tag, and a Linux platform
+tag. Source archives, PyPy wheels, universal wheels, and `py3-none-any` LMDB
+wheels are rejected before runtime dependency installation.
+
+On Nibi, the expected LMDB resolver diagnostic is equivalent to:
+
+```text
+name=lmdb
+version=1.4.1+computecanada
+filename=lmdb-1.4.1+computecanada-cp310-cp310-linux_x86_64.whl
+native_candidate=True
+```
+
+After runtime dependencies install, the bootstrap validates LMDB before
+Uni-Core. It starts a clean subprocess with `LMDB_FORCE_CFFI`,
+`LMDB_FORCE_SYSTEM`, `LMDB_INCLUDEDIR`, and `LMDB_LIBDIR` removed, imports both
+`lmdb` and `lmdb.cpython`, prints the LMDB version, package path, native
+extension path, virtual-environment path, active implementation, and those
+environment-variable values, and requires the native extension to live inside
+`.venv-uniprop` with a valid CPython extension suffix. CFFI selection, generated
+CFFI products, and compiler launches during import are failures. The next stage
+runs a temporary LMDB database round-trip and prints `LMDB_NATIVE_SMOKE_OK`.
+The temporary database is created under `tempfile.TemporaryDirectory()` and
+leaves no persistent database.
 
 The `wandb==0.17.9` pin is a compatibility policy, not a scientific model
 dependency. Normal `wandb 0.17.9` supports Python 3.10 and does not require

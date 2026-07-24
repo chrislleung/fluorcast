@@ -431,10 +431,10 @@ PY
 
 stage "Uni-Core runtime dependency resolver preflight"
 if [[ "$DRY_RUN" -eq 1 ]]; then
-    run_cmd "$VENV_PYTHON" -m pip install --dry-run --report "<unicore-runtime-report>" --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"
+    run_cmd "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --report "<unicore-runtime-report>" --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"
 else
     UNICORE_RUNTIME_REPORT="$(mktemp)"
-    if ! "$VENV_PYTHON" -m pip install --dry-run --report "$UNICORE_RUNTIME_REPORT" --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"; then
+    if ! "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --report "$UNICORE_RUNTIME_REPORT" --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"; then
         rm -f "$UNICORE_RUNTIME_REPORT"
         fail "No compatible binary candidate exists for one or more Uni-Core runtime dependencies."
     fi
@@ -465,12 +465,14 @@ requirements = [
 wandb_requirements = [req for req in requirements if normalized(req.name) == "wandb"]
 if len(wandb_requirements) != 1 or str(wandb_requirements[0].specifier) != "==0.17.9":
     raise SystemExit("Uni-Core runtime requirements must pin wandb==0.17.9.")
+lmdb_requirements = [req for req in requirements if normalized(req.name) == "lmdb"]
+if len(lmdb_requirements) != 1 or str(lmdb_requirements[0].specifier) != "==1.4.1":
+    raise SystemExit("Uni-Core runtime requirements must pin lmdb==1.4.1.")
 
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 items = payload.get("install", [])
 print("Uni-Core runtime dependency dry-run selection:")
-if not items:
-    print("  All runtime dependencies are already installed; validating installed metadata after install.")
+lmdb_seen = False
 for item in items:
     metadata = item.get("metadata", {})
     raw_name = metadata.get("name", "")
@@ -486,8 +488,20 @@ for item in items:
         f"parsed_wheel_name={selected.parsed_name} | "
         f"parsed_wheel_version={selected.parsed_version} | "
         f"alliance_wheelhouse={selected.alliance_wheelhouse} | "
-        f"wheel_has_local_version={selected.has_local_version}"
+        f"wheel_has_local_version={selected.has_local_version} | "
+        f"native_candidate={selected.native_candidate}"
     )
+    if normalized(raw_name) == "lmdb":
+        lmdb_seen = True
+        print(
+            "  LMDB native candidate: "
+            f"name={selected.parsed_name} "
+            f"version={selected.report_version} "
+            f"filename={selected.decoded_filename} "
+            f"native_candidate={selected.native_candidate}"
+        )
+if not lmdb_seen:
+    raise SystemExit("pip dry-run did not select an LMDB wheel to validate.")
 print("Validated wheel-only runtime dependency dry-run report.")
 PY
     rm -f "$UNICORE_RUNTIME_REPORT"
@@ -495,6 +509,94 @@ fi
 
 stage "Uni-Core runtime dependencies"
 run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS" || fail "Uni-Core runtime dependency installation failed."
+
+stage "LMDB native import validation"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf 'DRY-RUN: env -u LMDB_FORCE_CFFI -u LMDB_FORCE_SYSTEM -u LMDB_INCLUDEDIR -u LMDB_LIBDIR %q - <<'\''PY'\''\n' "$VENV_PYTHON"
+    printf 'import lmdb\nimport lmdb.cpython\nPY\n'
+else
+    if ! env -u LMDB_FORCE_CFFI -u LMDB_FORCE_SYSTEM -u LMDB_INCLUDEDIR -u LMDB_LIBDIR "$VENV_PYTHON" - <<'PY'
+import importlib.machinery
+import os
+import sys
+from importlib import metadata
+from pathlib import Path
+from packaging.version import Version
+
+import lmdb
+import lmdb.cpython
+
+version = metadata.version("lmdb")
+package_path = Path(lmdb.__file__).resolve()
+extension_path = Path(lmdb.cpython.__file__).resolve()
+venv_path = Path(sys.prefix).resolve()
+extension_suffixes = tuple(importlib.machinery.EXTENSION_SUFFIXES)
+active_implementation = getattr(lmdb, "__implementation__", lmdb.cpython.__name__)
+override_names = ("LMDB_FORCE_CFFI", "LMDB_FORCE_SYSTEM", "LMDB_INCLUDEDIR", "LMDB_LIBDIR")
+
+print("LMDB native diagnostic:")
+print(f"  LMDB version: {version}")
+print(f"  LMDB package path: {package_path}")
+print(f"  lmdb.cpython extension path: {extension_path}")
+print(f"  Virtual environment path: {venv_path}")
+print(f"  Active implementation: {active_implementation}")
+for name in override_names:
+    print(f"  {name}: {os.environ.get(name)!r}")
+
+if Version(version).base_version != "1.4.1":
+    raise SystemExit(f"LMDB public version must be 1.4.1, got {version}.")
+if not extension_path.exists():
+    raise SystemExit(f"LMDB native module does not exist: {extension_path}")
+if venv_path not in extension_path.parents:
+    raise SystemExit(f"LMDB native module is outside the virtual environment: {extension_path}")
+if not extension_path.name.endswith(extension_suffixes):
+    raise SystemExit(f"LMDB native module does not use a valid extension suffix: {extension_path.name}")
+if "cffi" in str(active_implementation).lower() or "cffi" in str(extension_path).lower():
+    raise SystemExit("LMDB CFFI implementation selected; native lmdb.cpython is required.")
+for name in override_names:
+    if os.environ.get(name) is not None:
+        raise SystemExit(f"LMDB override environment variable was not removed: {name}")
+for generated in venv_path.rglob("_config.py"):
+    if "lmdb" in str(generated).lower() and "cffi" in str(generated).lower():
+        raise SystemExit(f"LMDB CFFI product was generated during import: {generated}")
+PY
+    then
+        fail "LMDB native import validation failed."
+    fi
+fi
+
+stage "LMDB round-trip smoke test"
+python_here "$(cat <<'PY'
+import lmdb
+import tempfile
+from pathlib import Path
+
+with tempfile.TemporaryDirectory() as directory:
+    database_path = Path(directory) / "smoke.lmdb"
+
+    environment = lmdb.open(
+        str(database_path),
+        map_size=8 * 1024 * 1024,
+        subdir=False,
+    )
+
+    try:
+        with environment.begin(write=True) as transaction:
+            transaction.put(b"fluorcast", b"uniprop")
+
+        with environment.begin() as transaction:
+            value = transaction.get(b"fluorcast")
+
+        if value != b"uniprop":
+            raise RuntimeError(
+                f"LMDB round-trip mismatch: {value!r}"
+            )
+    finally:
+        environment.close()
+
+print("LMDB_NATIVE_SMOKE_OK")
+PY
+)" || fail "LMDB native round-trip smoke test failed."
 
 stage "Uni-Core build prerequisite diagnostic"
 export FLUORCAST_UNIPROP_UNICORE_DIR="$UNICORE_DIR"

@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import pytest
+from packaging.tags import Tag
 
 from chemfluor.uniprop.resolver_report import (
     decoded_artifact_filename,
     parse_selected_wheel,
+    validate_lmdb_native_candidate,
     validate_report_item_wheel,
     validate_unicore_runtime_report,
     validate_unicore_runtime_report_item,
@@ -16,6 +18,9 @@ def _item(name: str, version: str, url: str, requires_dist: list[str] | None = N
     if requires_dist is not None:
         metadata["requires_dist"] = requires_dist
     return {"metadata": metadata, "download_info": {"url": url}}
+
+
+LMDB_CP310_LINUX_TAG = Tag("cp310", "cp310", "linux_x86_64")
 
 
 @pytest.mark.parametrize("scheme", ["file", "https"])
@@ -220,3 +225,83 @@ def test_runtime_validation_rejects_unpinned_wandb() -> None:
                 "https://example.invalid/wandb-0.27.2-py3-none-any.whl",
             )
         )
+
+
+def test_lmdb_computecanada_local_version_satisfies_public_141_policy() -> None:
+    selected = validate_lmdb_native_candidate(
+        _item(
+            "lmdb",
+            "1.4.1+computecanada",
+            "file:///cvmfs/soft.computecanada.ca/wheelhouse/lmdb-1.4.1%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
+        ),
+        supported_tags={LMDB_CP310_LINUX_TAG},
+    )
+
+    assert selected.parsed_name == "lmdb"
+    assert selected.parsed_version.base_version == "1.4.1"
+    assert str(selected.parsed_version) == "1.4.1+computecanada"
+    assert selected.decoded_filename == "lmdb-1.4.1+computecanada-cp310-cp310-linux_x86_64.whl"
+    assert selected.native_candidate is True
+
+
+@pytest.mark.parametrize(
+    ("version", "filename", "match"),
+    [
+        ("1.7.5", "lmdb-1.7.5-py3-none-any.whl", "public version 1.7.5"),
+        ("2.3.0", "lmdb-2.3.0-cp310-cp310-linux_x86_64.whl", "public version 2.3.0"),
+        ("1.4.1", "lmdb-1.4.1-py3-none-any.whl", "universal"),
+        ("1.4.1", "lmdb-1.4.1-pp310-pypy310_pp73-linux_x86_64.whl", "PyPy"),
+        ("1.4.1", "lmdb-1.4.1-cp311-cp311-linux_x86_64.whl", "implementation"),
+        ("1.4.1", "lmdb-1.4.1-cp310-abi3-linux_x86_64.whl", "ABI"),
+        ("1.4.1", "lmdb-1.4.1-cp310-cp310-win_amd64.whl", "Linux"),
+    ],
+)
+def test_lmdb_native_policy_rejects_unusable_wheels(version: str, filename: str, match: str) -> None:
+    with pytest.raises(RuntimeError, match=match):
+        validate_lmdb_native_candidate(
+            _item("lmdb", version, f"https://example.invalid/{filename}"),
+            supported_tags={LMDB_CP310_LINUX_TAG},
+        )
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "lmdb-1.4.1.tar.gz",
+        "lmdb-1.4.1.zip",
+        "lmdb-1.4.1.tar.bz2",
+    ],
+)
+def test_lmdb_source_archives_are_rejected(filename: str) -> None:
+    with pytest.raises(RuntimeError, match="non-wheel artifact"):
+        validate_lmdb_native_candidate(
+            _item("lmdb", "1.4.1", f"https://example.invalid/{filename}"),
+            supported_tags={LMDB_CP310_LINUX_TAG},
+        )
+
+
+def test_lmdb_wheel_tags_are_compared_against_supported_tags() -> None:
+    with pytest.raises(RuntimeError, match="not compatible"):
+        validate_lmdb_native_candidate(
+            _item(
+                "lmdb",
+                "1.4.1+computecanada",
+                "file:///wheelhouse/lmdb-1.4.1%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
+            ),
+            supported_tags={Tag("cp310", "cp310", "manylinux_2_17_x86_64")},
+        )
+
+
+def test_runtime_report_uses_lmdb_native_policy() -> None:
+    payload = {
+        "install": [
+            _item(
+                "lmdb",
+                "1.7.5",
+                "file:///wheelhouse/lmdb-1.7.5-py3-none-any.whl",
+            )
+        ]
+    }
+
+    with pytest.raises(RuntimeError, match="public version 1.7.5"):
+        validate_unicore_runtime_report(payload)

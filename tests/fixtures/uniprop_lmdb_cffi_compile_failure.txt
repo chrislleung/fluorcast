@@ -1,0 +1,7 @@
+building '_cffi__x1234' extension
+gcc -pthread -Wsign-compare -DNDEBUG -g -fwrapv -O3 -Wall -fPIC -I/usr/include -c lmdb/_config.c
+lmdb/_config.c:1:10: fatal error: lmdb.h: No such file or directory
+    1 | #include "lmdb.h"
+      |          ^~~~~~~~
+compilation terminated.
+cffi.VerificationError: CompileError: command '/usr/bin/gcc' failed with exit code 1

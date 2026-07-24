@@ -1,4 +1,4 @@
-lmdb
+lmdb==1.4.1
 tqdm
 ml_collections
 scipy

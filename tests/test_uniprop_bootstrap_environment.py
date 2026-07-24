@@ -34,6 +34,12 @@ WANDB_PYDANTIC_RESOLUTION_FAILURE = (
 ENCODED_WHEEL_FALSE_FAILURE = (
     PROJECT_ROOT / "tests" / "fixtures" / "uniprop_encoded_wheel_false_failure.txt"
 )
+LMDB_NATIVE_IMPORT_FAILURE = (
+    PROJECT_ROOT / "tests" / "fixtures" / "uniprop_lmdb_native_import_failure.txt"
+)
+LMDB_CFFI_COMPILE_FAILURE = (
+    PROJECT_ROOT / "tests" / "fixtures" / "uniprop_lmdb_cffi_compile_failure.txt"
+)
 UNICORE_RUNTIME_REQUIREMENTS = (
     PROJECT_ROOT / "configs" / "uniprop" / "unicore_runtime_requirements.txt"
 )
@@ -307,7 +313,7 @@ def test_cuda_path_rejects_cpu_only_torch() -> None:
 def test_unicore_runtime_requirements_are_explicit_and_do_not_reinstall_torch_numpy() -> None:
     requirements = UNICORE_RUNTIME_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
     assert requirements == [
-        "lmdb",
+        "lmdb==1.4.1",
         "tqdm",
         "ml_collections",
         "scipy",
@@ -315,6 +321,8 @@ def test_unicore_runtime_requirements_are_explicit_and_do_not_reinstall_torch_nu
         "tokenizers",
         "wandb==0.17.9",
     ]
+    assert "lmdb" not in requirements
+    assert "lmdb==2.3.0" not in requirements
     assert "torch" not in "\n".join(requirements).lower()
     assert "numpy" not in "\n".join(requirements).lower()
 
@@ -323,8 +331,10 @@ def test_unicore_runtime_dependencies_are_installed_before_local_unicore() -> No
     text = BOOTSTRAP.read_text(encoding="utf-8")
     runtime_preflight = text.index('stage "Uni-Core runtime dependency resolver preflight"')
     runtime_install = text.index('stage "Uni-Core runtime dependencies"')
+    lmdb_import = text.index('stage "LMDB native import validation"')
+    lmdb_smoke = text.index('stage "LMDB round-trip smoke test"')
     local_install = text.index('stage "Uni-Core direct install"')
-    assert runtime_preflight < runtime_install < local_install
+    assert runtime_preflight < runtime_install < lmdb_import < lmdb_smoke < local_install
 
 
 def test_unicore_runtime_dependency_install_is_wheel_only_and_isolated_normally() -> None:
@@ -335,7 +345,8 @@ def test_unicore_runtime_dependency_install_is_wheel_only_and_isolated_normally(
     local_install = text.index('stage "Uni-Core direct install"')
     resolver_block = text[runtime_preflight:runtime_install]
     install_block = text[runtime_install:diagnostic]
-    assert "--dry-run --report" in resolver_block
+    assert "--dry-run --ignore-installed --report" in resolver_block
+    assert "--ignore-installed" in resolver_block
     assert "--only-binary=:all:" in resolver_block
     assert "--only-binary=:all:" in install_block
     assert "--no-build-isolation" not in resolver_block + install_block
@@ -355,6 +366,10 @@ def test_unicore_runtime_report_validation_rejects_bad_resolution() -> None:
     assert "parsed_wheel_name=" in block
     assert "parsed_wheel_version=" in block
     assert "wheel_has_local_version=" in block
+    assert "native_candidate=" in block
+    assert "LMDB native candidate:" in block
+    assert "pip dry-run did not select an LMDB wheel to validate." in block
+    assert 'str(lmdb_requirements[0].specifier) != "==1.4.1"' in block
     assert 'str(wandb_requirements[0].specifier) != "==0.17.9"' in block
     assert "selected wandb {version}; expected" in helper
     assert 'FORBIDDEN = {"pydantic", "pydantic-core", "pydantic_core", "maturin"}' in block
@@ -371,6 +386,33 @@ def test_runtime_dependency_install_remains_wheel_only_after_report_validation()
     build_diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
     block = text[runtime_install:build_diagnostic]
     assert 'pip install --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"' in block
+
+
+def test_lmdb_native_validation_runs_before_unicore_and_requires_cpython_module() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    lmdb_import = text.index('stage "LMDB native import validation"')
+    lmdb_smoke = text.index('stage "LMDB round-trip smoke test"')
+    unicore_diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
+    block = text[lmdb_import:lmdb_smoke]
+    assert lmdb_import < lmdb_smoke < unicore_diagnostic
+    assert "env -u LMDB_FORCE_CFFI -u LMDB_FORCE_SYSTEM -u LMDB_INCLUDEDIR -u LMDB_LIBDIR" in block
+    assert "import lmdb.cpython" in block
+    assert "EXTENSION_SUFFIXES" in block
+    assert "venv_path not in extension_path.parents" in block
+    assert "CFFI implementation selected" in block
+    assert 'Version(version).base_version != "1.4.1"' in block
+    assert 'fail "LMDB native import validation failed."' in block
+
+
+def test_lmdb_round_trip_success_is_required_before_unicore() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    lmdb_smoke = text.index('stage "LMDB round-trip smoke test"')
+    unicore_diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
+    block = text[lmdb_smoke:unicore_diagnostic]
+    assert "tempfile.TemporaryDirectory()" in block
+    assert 'transaction.put(b"fluorcast", b"uniprop")' in block
+    assert "LMDB_NATIVE_SMOKE_OK" in block
+    assert 'fail "LMDB native round-trip smoke test failed."' in block
 
 
 def test_local_unicore_still_uses_no_build_isolation_and_no_deps() -> None:
@@ -468,12 +510,16 @@ def test_unicore_failure_prevents_unimol_plus_attempt() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
     dependency_resolution = text.index('fail "No compatible binary candidate exists for one or more Uni-Core runtime dependencies."')
     dependency_install = text.index('fail "Uni-Core runtime dependency installation failed."')
+    lmdb_import = text.index('fail "LMDB native import validation failed."')
+    lmdb_smoke = text.index('fail "LMDB native round-trip smoke test failed."')
     pip_check = text.index('fail "Uni-Core pip check failed."')
     unicore_install = text.index('fail "Uni-Core installation failed."')
     unicore_import = text.index('fail "Uni-Core required imports are unavailable."')
     unimol_install = text.index('stage "Uni-Mol+ direct install"')
     assert dependency_resolution < unimol_install
     assert dependency_install < unimol_install
+    assert lmdb_import < unimol_install
+    assert lmdb_smoke < unimol_install
     assert unicore_install < unimol_install
     assert pip_check < unimol_install
     assert unicore_import < unimol_install
@@ -514,6 +560,15 @@ def test_wandb_pydantic_resolution_fixture_matches_real_regression() -> None:
     fixture = WANDB_PYDANTIC_RESOLUTION_FAILURE.read_text(encoding="utf-8")
     assert "wandb-0.27.2+computecanada" in fixture
     assert "pydantic-2.13.4+computecanada" in fixture
+
+
+def test_lmdb_failure_fixtures_match_real_regression() -> None:
+    native_fixture = LMDB_NATIVE_IMPORT_FAILURE.read_text(encoding="utf-8")
+    cffi_fixture = LMDB_CFFI_COMPILE_FAILURE.read_text(encoding="utf-8")
+    assert "lmdb-1.7.5-py3-none-any.whl" in native_fixture
+    assert "ModuleNotFoundError: No module named 'lmdb.cpython'" in native_fixture
+    assert "fatal error: lmdb.h: No such file or directory" in cffi_fixture
+    assert "cffi.VerificationError" in cffi_fixture
 
 
 def test_optional_cuda_extension_toolkit_guard_is_strict_only_when_requested() -> None:

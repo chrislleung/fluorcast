@@ -8,6 +8,7 @@ from urllib.parse import unquote, urlsplit
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
+from packaging.tags import Tag, sys_tags
 from packaging.utils import (
     InvalidWheelFilename,
     canonicalize_name,
@@ -36,8 +37,10 @@ class SelectedWheel:
     decoded_filename: str
     parsed_name: str
     parsed_version: Version
+    wheel_tags: frozenset[Tag]
     alliance_wheelhouse: bool
     has_local_version: bool
+    native_candidate: bool = False
 
 
 def normalized_package_name(name: str) -> str:
@@ -85,7 +88,7 @@ def validate_report_item_wheel(item: dict) -> SelectedWheel:
             "Resolver selected a non-wheel artifact: "
             f"original_url={url} decoded_filename={decoded_filename}"
         ) from exc
-    parsed_name, parsed_version, _build, _tags = parsed_wheel
+    parsed_name, parsed_version, _build, wheel_tags = parsed_wheel
     canonical_report_name = normalized_package_name(report_name)
     canonical_wheel_name = normalized_package_name(str(parsed_name))
     if canonical_wheel_name != canonical_report_name:
@@ -111,8 +114,62 @@ def validate_report_item_wheel(item: dict) -> SelectedWheel:
         decoded_filename=decoded_filename,
         parsed_name=canonical_wheel_name,
         parsed_version=parsed_version,
+        wheel_tags=frozenset(wheel_tags),
         alliance_wheelhouse=alliance,
         has_local_version=parsed_version.local is not None,
+    )
+
+
+def validate_lmdb_native_candidate(
+    item: dict,
+    *,
+    supported_tags: set[Tag] | frozenset[Tag] | None = None,
+) -> SelectedWheel:
+    """Require the Nibi-capable LMDB CPython 3.10 Linux native wheel policy."""
+
+    selected = validate_report_item_wheel(item)
+    selected_version = Version(selected.report_version)
+    if selected.parsed_name != "lmdb":
+        raise RuntimeError(f"LMDB policy received non-lmdb artifact: {selected.report_name}")
+    if selected_version.base_version != "1.4.1":
+        raise RuntimeError(
+            f"LMDB selected public version {selected_version.base_version}; expected 1.4.1."
+        )
+    if selected.parsed_version.base_version != "1.4.1":
+        raise RuntimeError(
+            f"LMDB wheel public version {selected.parsed_version.base_version}; expected 1.4.1."
+        )
+
+    tags = selected.wheel_tags
+    interpreters = {tag.interpreter for tag in tags}
+    abis = {tag.abi for tag in tags}
+    platforms = {tag.platform for tag in tags}
+
+    if any(interpreter.startswith("pp") for interpreter in interpreters):
+        raise RuntimeError(f"LMDB PyPy wheels are prohibited: {selected.decoded_filename}")
+    if any(tag.interpreter == "py3" and tag.abi == "none" and tag.platform == "any" for tag in tags):
+        raise RuntimeError(f"LMDB universal wheels are prohibited: {selected.decoded_filename}")
+    if "cp310" not in interpreters:
+        raise RuntimeError(f"LMDB wheel must have a CPython 3.10 implementation tag: {selected.decoded_filename}")
+    if "cp310" not in abis:
+        raise RuntimeError(f"LMDB wheel must have a CPython 3.10 ABI tag: {selected.decoded_filename}")
+    if not any(platform.startswith("linux") or "_linux_" in platform for platform in platforms):
+        raise RuntimeError(f"LMDB wheel must be a Linux platform wheel: {selected.decoded_filename}")
+    compatible_tags = supported_tags if supported_tags is not None else set(sys_tags())
+    if not tags.intersection(compatible_tags):
+        raise RuntimeError(f"LMDB wheel tags are not compatible with this Python: {selected.decoded_filename}")
+
+    return SelectedWheel(
+        report_name=selected.report_name,
+        report_version=selected.report_version,
+        original_url=selected.original_url,
+        decoded_filename=selected.decoded_filename,
+        parsed_name=selected.parsed_name,
+        parsed_version=selected.parsed_version,
+        wheel_tags=selected.wheel_tags,
+        alliance_wheelhouse=selected.alliance_wheelhouse,
+        has_local_version=selected.has_local_version,
+        native_candidate=True,
     )
 
 
@@ -130,6 +187,8 @@ def validate_unicore_runtime_report_item(item: dict, *, required_wandb: str = "0
         raise RuntimeError(f"Runtime dependency resolution selected wandb {version}; expected {required_wandb}.")
 
     selected = validate_report_item_wheel(item)
+    if name == "lmdb":
+        selected = validate_lmdb_native_candidate(item)
 
     requires_dist = metadata.get("requires_dist") or []
     marker_environment = default_environment()
