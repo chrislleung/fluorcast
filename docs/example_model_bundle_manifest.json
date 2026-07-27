@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "artifact_version": "fluorcast-production-2026.07.0",
+  "created_at": "2026-07-27T00:00:00Z",
+  "compatible_git": {
+    "tags": ["v2026.07.0"],
+    "commits": ["0123456789abcdef0123456789abcdef01234567"]
+  },
+  "python_version": "3.11",
+  "package_versions": {
+    "catboost": "1.2.8",
+    "lightgbm": "4.6.0",
+    "numpy": "1.26.4",
+    "pandas": "2.3.1",
+    "rdkit": "Alliance module",
+    "scikit-learn": "1.7.1",
+    "scipy": "1.16.0",
+    "xgboost": "3.0.2"
+  },
+  "required_files": [
+    {
+      "path": "tree/rf/model.joblib",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "path": "neural/feature_metadata.json",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "path": "hybrid/absorption_nm/model.joblib",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "path": "hybrid/emission_nm/model.joblib",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    },
+    {
+      "path": "hybrid/quantum_yield/model.joblib",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  ]
+}

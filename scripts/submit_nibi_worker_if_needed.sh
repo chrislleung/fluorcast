@@ -2,8 +2,8 @@
 set -euo pipefail
 
 WORKER_JOB_NAME="fluorcast-work"
-DEFAULT_REPO="/home/chrisl/scratch/ChemFluor_Project"
-WORKER_ENV="/home/chrisl/scratch/fluorcast_worker.env"
+DEFAULT_REPO="${SCRATCH:-$HOME/scratch}/FluorCast"
+WORKER_ENV="${FLUORCAST_WORKER_ENV:-${SCRATCH:-$HOME/scratch}/fluorcast_worker.env}"
 
 FLUORCAST_REPO="${FLUORCAST_REPO:-$DEFAULT_REPO}"
 

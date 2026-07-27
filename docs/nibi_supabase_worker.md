@@ -13,7 +13,7 @@ The worker currently handles prediction jobs only.
 Keep the real worker environment in this NIBI-only file:
 
 ```bash
-/home/chrisl/scratch/fluorcast_worker.env
+$SCRATCH/fluorcast_worker.env
 ```
 
 Set these variables there or export them before manual runs:
@@ -21,8 +21,8 @@ Set these variables there or export them before manual runs:
 ```bash
 export SUPABASE_URL="https://example-project.supabase.co"
 export SUPABASE_SERVICE_ROLE_KEY="fake-service-role-key-for-docs-only"
-export FLUORCAST_REPO="/home/your-user/scratch/FluorCast"
-export FLUORCAST_JOBS_DIR="/home/your-user/scratch/fluorcast-jobs"
+export FLUORCAST_REPO="$SCRATCH/FluorCast"
+export FLUORCAST_JOBS_DIR="$SCRATCH/fluorcast-jobs"
 export FLUORCAST_POLL_LIMIT="5"
 ```
 
@@ -33,8 +33,8 @@ Example `.env` content, using fake values only:
 ```bash
 SUPABASE_URL=https://example-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=fake-service-role-key-for-docs-only
-FLUORCAST_REPO=/home/your-user/scratch/FluorCast
-FLUORCAST_JOBS_DIR=/home/your-user/scratch/fluorcast-jobs
+FLUORCAST_REPO=$SCRATCH/FluorCast
+FLUORCAST_JOBS_DIR=$SCRATCH/fluorcast-jobs
 FLUORCAST_POLL_LIMIT=5
 ```
 
@@ -43,7 +43,7 @@ Do not commit real `.env` files or service role keys.
 ## Security
 
 The Supabase service role key must live only on trusted NIBI infrastructure.
-For this deployment, keep it in `/home/chrisl/scratch/fluorcast_worker.env`.
+For this deployment, keep it in `$SCRATCH/fluorcast_worker.env`.
 It must not be shipped to browser code, Vercel client code, public logs,
 notebooks, or checked-in files. The portal should create queued rows in
 Supabase; it should not SSH into NIBI.
@@ -136,7 +136,7 @@ inserting results, or updating Supabase rows.
 
 ## Run From Slurm
 
-The Slurm wrapper sources `/home/chrisl/scratch/fluorcast_worker.env` and runs
+The Slurm wrapper sources `$SCRATCH/fluorcast_worker.env` and runs
 the worker in loop mode with a 30-second interval and a 15-minute idle exit:
 
 ```bash
@@ -168,7 +168,7 @@ sbatch \
   --time=24:00:00 \
   --cpus-per-task=1 \
   --mem=2G \
-  --wrap='cd /home/chrisl/scratch/FluorCast && set -a && source /home/chrisl/scratch/fluorcast_worker.env && set +a && python scripts/nibi_supabase_worker.py --loop --interval-seconds 30'
+  --wrap='cd "$SCRATCH/FluorCast" && set -a && source "$SCRATCH/fluorcast_worker.env" && set +a && python scripts/nibi_supabase_worker.py --loop --interval-seconds 30'
 ```
 
 Use this only when an always-on demo is worth the idle allocation. Normal
@@ -180,14 +180,14 @@ For normal low-traffic use, run the launcher from cron. It starts a short worker
 only when one is not already queued or running:
 
 ```bash
-bash /home/chrisl/scratch/FluorCast/scripts/submit_nibi_worker_if_needed.sh
+bash "$SCRATCH/FluorCast/scripts/submit_nibi_worker_if_needed.sh"
 ```
 
 The launcher:
 
 - uses `FLUORCAST_REPO` when set, otherwise
-  `/home/chrisl/scratch/FluorCast`
-- sources `/home/chrisl/scratch/fluorcast_worker.env`
+  `$SCRATCH/FluorCast`
+- sources `$SCRATCH/fluorcast_worker.env`
 - checks for an existing Slurm job named `fluorcast-work`
 - exits without submitting when one is already queued or running
 - submits `slurm/run_nibi_supabase_worker.sbatch` when no worker exists
@@ -195,7 +195,7 @@ The launcher:
 Example crontab entry for every 10 minutes:
 
 ```cron
-*/10 * * * * /usr/bin/env bash /home/chrisl/scratch/FluorCast/scripts/submit_nibi_worker_if_needed.sh >> /home/chrisl/scratch/fluorcast_worker_launcher.log 2>&1
+*/10 * * * * /usr/bin/env bash "$SCRATCH/FluorCast/scripts/submit_nibi_worker_if_needed.sh" >> "$SCRATCH/fluorcast_worker_launcher.log" 2>&1
 ```
 
 With this schedule, new portal jobs may wait up to the cron interval before a
@@ -213,7 +213,7 @@ squeue -u "$USER" -n fluorcast-work
 Review launcher logs:
 
 ```bash
-tail -n 100 /home/chrisl/scratch/fluorcast_worker_launcher.log
+tail -n 100 "$SCRATCH/fluorcast_worker_launcher.log"
 ```
 
 ## Stop The Worker

@@ -1,7 +1,6 @@
 #!/bin/bash
 # Archived workflow; retained for reproducibility, not routine use.
 #SBATCH --job-name=chemfluor
-#SBATCH --account=def-yzhao
 #SBATCH --time=06:00:00
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G
@@ -17,7 +16,12 @@ module load python/3.11
 module load gcc
 module load rdkit
 
-source ~/scratch/chemfluor_env/bin/activate
+if [[ -z "${FLUORCAST_ACTIVATE:-}" || ! -f "$FLUORCAST_ACTIVATE" ]]; then
+  echo "FLUORCAST_ACTIVATE must point to the environment activation script." >&2
+  exit 2
+fi
+# shellcheck disable=SC1090
+source "$FLUORCAST_ACTIVATE"
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export MKL_NUM_THREADS=$SLURM_CPUS_PER_TASK

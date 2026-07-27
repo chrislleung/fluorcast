@@ -13,8 +13,8 @@ absorption or lifetime fields, but the JSON job outputs do not expose them.
 Create a job directory and prediction input on NIBI:
 
 ```bash
-mkdir -p /home/chrisl/scratch/fluorcast-jobs/job_test_001
-cat > /home/chrisl/scratch/fluorcast-jobs/job_test_001/input.json <<'JSON'
+mkdir -p "$SCRATCH/fluorcast-jobs/job_test_001"
+cat > "$SCRATCH/fluorcast-jobs/job_test_001/input.json" <<'JSON'
 {
   "job_id": "job_test_001",
   "user_id": "local-test-user",
@@ -30,17 +30,17 @@ From the repository, run it locally with the current Python environment:
 
 ```bash
 python scripts/run_prediction_job.py \
-  --input /home/chrisl/scratch/fluorcast-jobs/job_test_001/input.json \
-  --output /home/chrisl/scratch/fluorcast-jobs/job_test_001/output.json
+  --input "$SCRATCH/fluorcast-jobs/job_test_001/input.json" \
+  --output "$SCRATCH/fluorcast-jobs/job_test_001/output.json"
 ```
 
 Submit the same prediction through Slurm:
 
 ```bash
-mkdir -p /home/chrisl/scratch/fluorcast-jobs/job_test_001
-export FLUORCAST_REPO=/home/chrisl/scratch/FluorCast
-export FLUORCAST_INPUT_JSON=/home/chrisl/scratch/fluorcast-jobs/job_test_001/input.json
-export FLUORCAST_OUTPUT_JSON=/home/chrisl/scratch/fluorcast-jobs/job_test_001/output.json
+mkdir -p "$SCRATCH/fluorcast-jobs/job_test_001"
+export FLUORCAST_REPO="$SCRATCH/FluorCast"
+export FLUORCAST_INPUT_JSON="$SCRATCH/fluorcast-jobs/job_test_001/input.json"
+export FLUORCAST_OUTPUT_JSON="$SCRATCH/fluorcast-jobs/job_test_001/output.json"
 sbatch slurm/run_prediction_job.sbatch
 ```
 
@@ -53,7 +53,7 @@ the directory where `sbatch` is invoked.
 Create a duplicate-check input JSON:
 
 ```bash
-cat > /home/chrisl/scratch/fluorcast-jobs/job_test_001/duplicate-input.json <<'JSON'
+cat > "$SCRATCH/fluorcast-jobs/job_test_001/duplicate-input.json" <<'JSON'
 {
   "submission_id": "submission_test_001",
   "user_id": "local-test-user",
@@ -68,18 +68,18 @@ Run it locally, optionally selecting a dataset:
 
 ```bash
 python scripts/run_duplicate_check_job.py \
-  --input /home/chrisl/scratch/fluorcast-jobs/job_test_001/duplicate-input.json \
-  --output /home/chrisl/scratch/fluorcast-jobs/job_test_001/duplicate-output.json \
+  --input "$SCRATCH/fluorcast-jobs/job_test_001/duplicate-input.json" \
+  --output "$SCRATCH/fluorcast-jobs/job_test_001/duplicate-output.json" \
   --dataset data/processed/fluodb_lite/combined_deduplicated.csv
 ```
 
 Submit it through Slurm:
 
 ```bash
-export FLUORCAST_REPO=/home/chrisl/scratch/FluorCast
-export FLUORCAST_INPUT_JSON=/home/chrisl/scratch/fluorcast-jobs/job_test_001/duplicate-input.json
-export FLUORCAST_OUTPUT_JSON=/home/chrisl/scratch/fluorcast-jobs/job_test_001/duplicate-output.json
-export FLUORCAST_DATASET=/home/chrisl/scratch/FluorCast/data/processed/fluodb_lite/combined_deduplicated.csv
+export FLUORCAST_REPO="$SCRATCH/FluorCast"
+export FLUORCAST_INPUT_JSON="$SCRATCH/fluorcast-jobs/job_test_001/duplicate-input.json"
+export FLUORCAST_OUTPUT_JSON="$SCRATCH/fluorcast-jobs/job_test_001/duplicate-output.json"
+export FLUORCAST_DATASET="$SCRATCH/FluorCast/data/processed/fluodb_lite/combined_deduplicated.csv"
 sbatch slurm/run_duplicate_check_job.sbatch
 ```
 
@@ -94,7 +94,7 @@ either prepare the environment before submission or point
 `FLUORCAST_ACTIVATE` at a shell activation script:
 
 ```bash
-export FLUORCAST_ACTIVATE=/home/chrisl/scratch/venvs/fluorcast/bin/activate
+export FLUORCAST_ACTIVATE="$SCRATCH/venvs/fluorcast/bin/activate"
 ```
 
 If neither activation option is present, the wrappers use `python` from the

@@ -35,8 +35,10 @@ else
 fi
 
 mkdir -p outputs/slurm
-mkdir -p outputs/model_experiments_fluodb
-mkdir -p models/experiments_fluodb
+TREE_OUT_ROOT="${FLUORCAST_TREE_OUT_ROOT:-models/experiments_fluodb}"
+TREE_COMPARE_OUT="${FLUORCAST_TREE_COMPARE_OUT:-outputs/model_experiments_fluodb}"
+mkdir -p "$TREE_COMPARE_OUT"
+mkdir -p "$TREE_OUT_ROOT"
 
 echo "Starting model experiments at $(date)"
 echo "Working directory: $(pwd)"
@@ -47,10 +49,10 @@ python -c "from rdkit import Chem; print('RDKit OK:', Chem.MolFromSmiles('CCO'))
 python -u scripts/run_combined_model_experiments.py \
   --standardized-combined data/processed/fluodb_lite/combined_deduplicated.csv \
   --solvent-descriptors data/solvent_descriptors_expanded_deep4chem.csv \
-  --out-root models/experiments_fluodb \
+  --out-root "$TREE_OUT_ROOT" \
   --models rf,extratrees,histgb,gbdt \
   --targets absorption_nm,emission_nm,quantum_yield \
-  --compare-out outputs/model_experiments_fluodb \
+  --compare-out "$TREE_COMPARE_OUT" \
   --benchmark-smiles "O=C(S/C(SC)=C(SC)/SC)C1=CC2=C(C=C1)NC3=CC=CC=C3S2" \
   --benchmark-solvent-smiles "CS(=O)C" \
   --known-emission-nm 539 \

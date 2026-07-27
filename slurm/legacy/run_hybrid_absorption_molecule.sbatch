@@ -9,9 +9,18 @@
 
 set -euo pipefail
 
-cd /scratch/chrisl/FluorCast
+PROJECT_ROOT="${FLUORCAST_REPO:-${SLURM_SUBMIT_DIR:-}}"
+if [[ -z "$PROJECT_ROOT" || ! -d "$PROJECT_ROOT" ]]; then
+  echo "FLUORCAST_REPO must point to the FluorCast repository." >&2
+  exit 2
+fi
+cd "$PROJECT_ROOT"
 
-PYTHON=/scratch/chrisl/FluorCast/.venv/bin/python
+if [[ -n "${FLUORCAST_ACTIVATE:-}" ]]; then
+  # shellcheck disable=SC1090
+  source "$FLUORCAST_ACTIVATE"
+fi
+PYTHON="${FLUORCAST_PYTHON:-python}"
 
 echo "PWD: $(pwd)"
 echo "Python: $PYTHON"

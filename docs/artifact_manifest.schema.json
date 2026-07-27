@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chrislleung/fluorcast/docs/artifact_manifest.schema.json",
+  "title": "FluorCast production model artifact manifest",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "artifact_version",
+    "compatible_git",
+    "python_version",
+    "package_versions",
+    "required_files"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": { "const": 1 },
+    "artifact_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "compatible_git": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tags": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "commits": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" }
+        }
+      }
+    },
+    "python_version": {
+      "type": "string",
+      "pattern": "^3\\.11(\\.|$)"
+    },
+    "package_versions": {
+      "type": "object",
+      "additionalProperties": { "type": "string", "minLength": 1 }
+    },
+    "required_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "sha256"],
+        "additionalProperties": false,
+        "properties": {
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "not": { "pattern": "(^/|(^|/)\\.\\.(/|$))" }
+          },
+          "sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          }
+        }
+      }
+    }
+  }
+}

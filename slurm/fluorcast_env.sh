@@ -4,12 +4,7 @@ set -euo pipefail
 CANDIDATES=(
   "${FLUORCAST_PYTHON:-}"
   "${FLUORCAST_REPO:-$HOME/scratch/FluorCast}/.venv/bin/python"
-  "$HOME/scratch/chemfluor_env/bin/python"
-  "$HOME/scratch/fluorcast_env/bin/python"
-  "/scratch/chrisl/FluorCast/.venv/bin/python"
-  "/scratch/chrisl/fluorcast_env/bin/python"
-  "/home/chrisl/scratch/FluorCast/.venv/bin/python"
-  "/home/chrisl/scratch/chemfluor_env/bin/python"
+  "${FLUORCAST_ENV_DIR:-$HOME/scratch/fluorcast-env}/bin/python"
 )
 
 PYTHON=""

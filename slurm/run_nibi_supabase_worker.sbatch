@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-FLUORCAST_WORKER_ENV="${FLUORCAST_WORKER_ENV:-/home/chrisl/scratch/fluorcast_worker.env}"
+: "${FLUORCAST_WORKER_ENV:?FLUORCAST_WORKER_ENV must point to the worker environment file}"
 if [[ ! -f "$FLUORCAST_WORKER_ENV" ]]; then
     echo "Worker environment file does not exist: $FLUORCAST_WORKER_ENV" >&2
     exit 2
@@ -43,12 +43,6 @@ if [[ -n "${FLUORCAST_ACTIVATE:-}" ]]; then
     fi
     # shellcheck disable=SC1090
     source "$FLUORCAST_ACTIVATE"
-elif [[ -f "$HOME/scratch/chemfluor_env/bin/activate" ]]; then
-    # shellcheck disable=SC1091
-    source "$HOME/scratch/chemfluor_env/bin/activate"
-elif [[ -f "$HOME/scratch/fluorcast_env/bin/activate" ]]; then
-    # shellcheck disable=SC1091
-    source "$HOME/scratch/fluorcast_env/bin/activate"
 elif [[ -f .venv/bin/activate ]]; then
     # shellcheck disable=SC1091
     source .venv/bin/activate
