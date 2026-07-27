@@ -57,6 +57,10 @@ if [[ ! -f "$constraints" ]]; then
   json_event "failed" "CONSTRAINTS_MISSING" "Pinned constraints file is missing."
   exit 2
 fi
+if ! command -v module >/dev/null 2>&1; then
+  json_event "failed" "MODULE_COMMAND_MISSING" "Environment modules are not available."
+  exit 1
+fi
 
 tmp_requirements="$(mktemp "${TMPDIR:-/tmp}/fluorcast-requirements.XXXXXX")"
 cleanup() {

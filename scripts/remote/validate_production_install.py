@@ -40,6 +40,10 @@ def _finite_prediction(record: dict[str, Any]) -> bool:
 
 def _write_state(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        path.parent.chmod(0o700)
+    except OSError:
+        pass
     temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     temp.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     os.replace(temp, path)
@@ -101,6 +105,7 @@ def validate(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "schema_version": 1,
         "status": "ready",
         "artifact_dir": artifact_dir.name,
+        "state_file": str(args.state_file.resolve()),
         "validated_at": "slurm-validation",
     }
     _write_state(args.state_file, state)

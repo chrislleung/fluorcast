@@ -29,4 +29,4 @@ source "$FLUORCAST_ACTIVATE"
 python scripts/remote/validate_production_install.py \
   --repo-dir "$PROJECT_ROOT" \
   --artifact-dir "${FLUORCAST_ARTIFACT_DIR:-$PROJECT_ROOT/models}" \
-  --state-file "${FLUORCAST_INSTALL_STATE:-$PROJECT_ROOT/install-state.json}"
+  --state-file "${FLUORCAST_INSTALL_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/fluorcast/install-state.json}"

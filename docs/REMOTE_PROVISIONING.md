@@ -10,11 +10,11 @@ Clone the repository, create a runtime environment, install a signed model
 bundle, and validate the installation:
 
 ```bash
-git clone https://github.com/chrislleung/fluorcast.git FluorCast
+git clone --branch feature/reproducible-remote-provisioning https://github.com/chrislleung/fluorcast.git FluorCast
 cd FluorCast
 bash scripts/remote/provision_environment.sh \
   --repo-dir "$PWD" \
-  --env-dir "$SCRATCH/fluorcast-env"
+  --env-dir "$HOME/.virtualenvs/fluorcast-dev"
 python scripts/remote/install_model_bundle.py \
   --archive "$SCRATCH/fluorcast-production.tar.gz" \
   --checksum "$SCRATCH/fluorcast-production.sha256.json" \
@@ -22,10 +22,25 @@ python scripts/remote/install_model_bundle.py \
   --destination "$SCRATCH/fluorcast-artifacts"
 python scripts/remote/check_installation.py \
   --repo-dir "$PWD" \
-  --env-dir "$SCRATCH/fluorcast-env" \
+  --env-dir "$HOME/.virtualenvs/fluorcast-dev" \
   --artifact-dir "$SCRATCH/fluorcast-artifacts" \
   --expected-version "fluorcast-production-2026.07.0"
 ```
+
+For a production release, clone an immutable release tag or exact commit instead
+of mutable `main`:
+
+```bash
+git clone --branch <release-tag> --depth 1 https://github.com/chrislleung/fluorcast.git FluorCast
+cd FluorCast
+bash scripts/remote/provision_environment.sh \
+  --repo-dir "$PWD" \
+  --env-dir "$HOME/.virtualenvs/fluorcast-<version>"
+```
+
+Use `$HOME/.virtualenvs/fluorcast-<version>` or another persistent project/home
+location for the Python environment. Keep transient job directories and large
+temporary archives under `$SCRATCH`.
 
 ## Existing Installation
 
@@ -56,13 +71,19 @@ Retraining is an explicit Slurm fallback:
 bash scripts/remote/submit_production_training.sh \
   --account "$FLUORCAST_SLURM_ACCOUNT" \
   --repo-dir "$PWD" \
-  --env-activate "$SCRATCH/fluorcast-env/bin/activate"
+  --env-activate "$HOME/.virtualenvs/fluorcast-<version>/bin/activate" \
+  --split-type molecule
 ```
 
 The script submits tree, neural, three hybrid target jobs, and a final
 validation job with `afterok` dependencies. It never runs training Python
-directly. Re-running the command reads `provisioning-state.json` instead of
-submitting duplicate jobs.
+directly. Re-running the command reads
+`${XDG_STATE_HOME:-$HOME/.local/state}/fluorcast/provisioning-state.json`
+instead of submitting duplicate jobs. The validation job writes
+`${XDG_STATE_HOME:-$HOME/.local/state}/fluorcast/install-state.json`.
+
+The production hybrid workflow defaults to the existing molecule split. Use
+`--split-type scaffold` only when intentionally submitting the scaffold variant.
 
 ## Recovery After Failed Setup
 
@@ -76,7 +97,9 @@ directory is not partially overwritten.
 
 Install the new bundle into a new destination directory, validate it with
 `check_installation.py`, then update the desktop app configuration to point at
-the new artifact path. Keep the old bundle until the new validation passes.
+the new artifact path. Keep the old bundle until the new validation passes. A
+production desktop release must pin an exact Git tag, artifact version, archive
+filename, manifest filename, checksum filename, and checksum value.
 
 ## Uninstalling Without Deleting User Jobs
 
