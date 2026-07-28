@@ -40,6 +40,9 @@ LMDB_NATIVE_IMPORT_FAILURE = (
 LMDB_CFFI_COMPILE_FAILURE = (
     PROJECT_ROOT / "tests" / "fixtures" / "uniprop_lmdb_cffi_compile_failure.txt"
 )
+PROTECTED_CLEAN_RESOLUTION_FALSE_REPLACEMENT = (
+    PROJECT_ROOT / "tests" / "fixtures" / "uniprop_protected_clean_resolution_false_replacement.txt"
+)
 UNICORE_RUNTIME_REQUIREMENTS = (
     PROJECT_ROOT / "configs" / "uniprop" / "unicore_runtime_requirements.txt"
 )
@@ -373,8 +376,13 @@ def test_unicore_runtime_report_validation_rejects_bad_resolution() -> None:
     assert 'str(wandb_requirements[0].specifier) != "==0.17.9"' in block
     assert "selected wandb {version}; expected" in helper
     assert 'FORBIDDEN = {"pydantic", "pydantic-core", "pydantic_core", "maturin"}' in block
-    assert 'REPLACE_FORBIDDEN = {"numpy", "torch"}' in block
-    assert "would replace protected package" in helper
+    assert "validate_protected_package_candidate" in block
+    assert "Protected package consistency:" in block
+    assert "installed={protected_decision.installed_version}" in block
+    assert "selected={protected_decision.selected_version}" in block
+    assert "action={protected_decision.action}" in block
+    assert "Protected package candidate matches installed distribution:" in block
+    assert "would replace protected package" not in helper
     assert 'marker_environment["extra"] = ""' in helper
     assert "declares forbidden dependency" in helper
     assert "alliance_wheelhouse=" in block
@@ -386,6 +394,27 @@ def test_runtime_dependency_install_remains_wheel_only_after_report_validation()
     build_diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
     block = text[runtime_install:build_diagnostic]
     assert 'pip install --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"' in block
+    install_line = 'run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"'
+    assert install_line in block
+    assert "--ignore-installed" not in install_line
+    assert "--force-reinstall" not in install_line
+    assert "--upgrade" not in install_line
+    assert "--upgrade-strategy" not in install_line
+    assert "Protected package pre-install snapshot:" in block
+    assert "Protected package post-install audit:" in block
+    assert "version changed after runtime install" in block
+    assert "disappeared after runtime install" in block
+    assert "moved outside .venv-uniprop after runtime install" in block
+
+
+def test_clean_resolution_false_replacement_fixture_is_now_retained() -> None:
+    fixture = PROTECTED_CLEAN_RESOLUTION_FALSE_REPLACEMENT.read_text(encoding="utf-8")
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert "Would install:" in fixture
+    assert "numpy-2.2.2+computecanada" in fixture
+    assert "Runtime dependency resolution would replace protected package numpy." in fixture
+    assert "Protected package candidate matches installed distribution:" in text
+    assert "{protected_decision.package_name} {protected_decision.installed_version}" in text
 
 
 def test_lmdb_native_validation_runs_before_unicore_and_requires_cpython_module() -> None:

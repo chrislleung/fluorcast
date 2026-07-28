@@ -431,6 +431,7 @@ PY
 
 stage "Uni-Core runtime dependency resolver preflight"
 if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf 'DRY-RUN: Uni-Core runtime dry-run intentionally uses --ignore-installed to produce a complete clean-resolution report.\n'
     run_cmd "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --report "<unicore-runtime-report>" --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"
 else
     UNICORE_RUNTIME_REPORT="$(mktemp)"
@@ -445,16 +446,27 @@ import sys
 from pathlib import Path
 from packaging.requirements import Requirement
 from chemfluor.uniprop.resolver_report import (
+    PROTECTED_RUNTIME_PACKAGES,
+    validate_protected_package_candidate,
     validate_unicore_runtime_report_item,
     normalized_package_name,
 )
+from importlib.metadata import PackageNotFoundError, version
 
 FORBIDDEN = {"pydantic", "pydantic-core", "pydantic_core", "maturin"}
-REPLACE_FORBIDDEN = {"numpy", "torch"}
 REQUIRED_WANDB = "0.17.9"
 
 def normalized(name: str) -> str:
     return normalized_package_name(name)
+
+def installed_protected_versions() -> dict[str, str]:
+    versions = {}
+    for name in sorted(PROTECTED_RUNTIME_PACKAGES):
+        try:
+            versions[name] = str(version(name))
+        except PackageNotFoundError:
+            continue
+    return versions
 
 requirements_path = Path(os.environ["FLUORCAST_UNIPROP_RUNTIME_REQUIREMENTS"])
 requirements = [
@@ -471,7 +483,9 @@ if len(lmdb_requirements) != 1 or str(lmdb_requirements[0].specifier) != "==1.4.
 
 payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 items = payload.get("install", [])
-print("Uni-Core runtime dependency dry-run selection:")
+protected_versions = installed_protected_versions()
+print("Uni-Core runtime dependency clean-resolution dry-run selection:")
+print("  dry_run_uses_ignore_installed=True")
 lmdb_seen = False
 for item in items:
     metadata = item.get("metadata", {})
@@ -491,6 +505,17 @@ for item in items:
         f"wheel_has_local_version={selected.has_local_version} | "
         f"native_candidate={selected.native_candidate}"
     )
+    protected_decision = validate_protected_package_candidate(item, protected_versions)
+    if protected_decision is not None:
+        print("Protected package consistency:")
+        print(f"  {protected_decision.package_name}")
+        print(f"  installed={protected_decision.installed_version}")
+        print(f"  selected={protected_decision.selected_version}")
+        print(f"  action={protected_decision.action}")
+        print(
+            "Protected package candidate matches installed distribution: "
+            f"{protected_decision.package_name} {protected_decision.installed_version}"
+        )
     if normalized(raw_name) == "lmdb":
         lmdb_seen = True
         print(
@@ -508,7 +533,76 @@ PY
 fi
 
 stage "Uni-Core runtime dependencies"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf 'DRY-RUN: %q - <<'\''PY'\'' %q\n' "$VENV_PYTHON" "<protected-runtime-before.json>"
+else
+    PROTECTED_RUNTIME_BEFORE="$(mktemp)"
+    PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PYTHON" - "$PROTECTED_RUNTIME_BEFORE" <<'PY'
+import json
+import sys
+from importlib import metadata
+from importlib.metadata import PackageNotFoundError
+from pathlib import Path
+from packaging.version import Version
+from chemfluor.uniprop.resolver_report import PROTECTED_RUNTIME_PACKAGES
+
+venv = Path(sys.prefix).resolve()
+snapshot = {}
+for name in sorted(PROTECTED_RUNTIME_PACKAGES):
+    try:
+        dist = metadata.distribution(name)
+    except PackageNotFoundError as exc:
+        raise SystemExit(f"Protected package metadata missing before runtime install: {name}") from exc
+    location = Path(dist.locate_file("")).resolve()
+    version = str(Version(dist.version))
+    snapshot[name] = {"version": version, "location": str(location)}
+    if location != venv and venv not in location.parents:
+        raise SystemExit(f"Protected package {name} is outside .venv-uniprop before runtime install: {location}")
+Path(sys.argv[1]).write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
+print("Protected package pre-install snapshot:")
+for name, data in snapshot.items():
+    print(f"  {name}: version={data['version']} location={data['location']}")
+PY
+fi
 run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS" || fail "Uni-Core runtime dependency installation failed."
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf 'DRY-RUN: Protected package post-install audit would compare retained package versions and locations.\n'
+else
+    PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PYTHON" - "$PROTECTED_RUNTIME_BEFORE" <<'PY'
+import json
+import sys
+from importlib import metadata
+from importlib.metadata import PackageNotFoundError
+from pathlib import Path
+from packaging.version import Version
+
+before = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+venv = Path(sys.prefix).resolve()
+print("Protected package post-install audit:")
+for name in sorted(before):
+    before_data = before[name]
+    try:
+        dist = metadata.distribution(name)
+    except PackageNotFoundError as exc:
+        raise SystemExit(f"Protected package disappeared after runtime install: {name}") from exc
+    after_version = str(Version(dist.version))
+    after_location = Path(dist.locate_file("")).resolve()
+    if after_version != before_data["version"]:
+        raise SystemExit(
+            f"Protected package version changed after runtime install: "
+            f"{name} before={before_data['version']} after={after_version}"
+        )
+    if str(after_location) != before_data["location"]:
+        raise SystemExit(
+            f"Protected package location changed after runtime install: "
+            f"{name} before={before_data['location']} after={after_location}"
+        )
+    if after_location != venv and venv not in after_location.parents:
+        raise SystemExit(f"Protected package {name} moved outside .venv-uniprop after runtime install: {after_location}")
+    print(f"  {name}: unchanged")
+PY
+    rm -f "$PROTECTED_RUNTIME_BEFORE"
+fi
 
 stage "LMDB native import validation"
 if [[ "$DRY_RUN" -eq 1 ]]; then

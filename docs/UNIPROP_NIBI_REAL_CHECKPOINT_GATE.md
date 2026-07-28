@@ -127,25 +127,73 @@ Uni-Core, using pip's normal build-isolation behavior and binary-only selection:
   -r configs/uniprop/unicore_runtime_requirements.txt
 ```
 
+The actual runtime dependency install is deliberately non-upgrading: it does
+not use `--ignore-installed`, `--force-reinstall`, `--upgrade`, or
+`--upgrade-strategy eager`. Immediately before that install, the bootstrap
+snapshots every protected distribution's canonical package name, exact
+normalized metadata version, and distribution location under `.venv-uniprop`.
+Immediately afterward, it captures the same data and fails if any protected
+package changed version, disappeared, or moved outside `.venv-uniprop`. The
+post-install audit is the authoritative proof that the runtime dependency
+install did not mutate the bootstrap-owned stack:
+
+```text
+Protected package post-install audit:
+  numpy: unchanged
+  torch: unchanged
+  pip: unchanged
+  setuptools: unchanged
+  wheel: unchanged
+  packaging: unchanged
+```
+
 Before running that install, the bootstrap runs a structured pip resolver
 preflight:
 
 ```bash
 .venv-uniprop/bin/python -m pip install \
   --dry-run \
+  --ignore-installed \
   --report <temporary-runtime-report.json> \
   --only-binary=:all: \
   -r configs/uniprop/unicore_runtime_requirements.txt
 ```
 
+The dry-run intentionally uses `--ignore-installed` only to obtain a complete
+clean-resolution report. That report may include packages already installed and
+validated in `.venv-uniprop`, such as NumPy, PyTorch, pip, setuptools, wheel,
+packaging, filelock, fsspec, and typing-extensions. A protected package
+appearing in the clean-resolution report does not by itself mean the real
+install will replace it.
+
 The bootstrap parses the JSON report, not ordinary pip console text. It fails
 before installation if any selected artifact is not a wheel, if `wandb` is not
-exactly `0.17.9`, if a selected package or normal dependency introduces
-`pydantic`, `pydantic-core`, or `maturin`, or if dependency resolution would
-replace the already validated NumPy or PyTorch installations. Every selected
-package is printed with its report name and version, original artifact URL,
-decoded artifact filename, parsed wheel name and version, Alliance-wheelhouse
-status, and whether the wheel version has a local label.
+exactly `0.17.9`, or if a selected package or normal dependency introduces
+`pydantic`, `pydantic-core`, or `maturin`. For protected packages selected by
+the clean-resolution report, the bootstrap reads installed distribution metadata
+with `importlib.metadata.version()` and compares it to the selected report
+version with `packaging.version.Version`. Exact normalized version equality is
+required, including Alliance local labels such as `+computecanada`;
+`2.2.2+computecanada` is not treated as equal to plain `2.2.2` for
+protected-package consistency. Matching protected packages are reported as
+retained, for example:
+
+```text
+Protected package consistency:
+  numpy
+  installed=2.2.2+computecanada
+  selected=2.2.2+computecanada
+  action=retain
+Protected package candidate matches installed distribution: numpy 2.2.2+computecanada
+```
+
+This exact protected-package comparison is separate from the established NumPy
+public-version policy, where the bootstrap still requires NumPy public/base
+version `2.2.2` and allows an Alliance local suffix.
+
+Every selected package is printed with its report name and version, original
+artifact URL, decoded artifact filename, parsed wheel name and version,
+Alliance-wheelhouse status, and whether the wheel version has a local label.
 
 Pip installation reports store selected artifact locations under
 `download_info.url`. URL path characters may be percent-encoded there. Alliance

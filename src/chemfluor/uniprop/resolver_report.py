@@ -23,7 +23,17 @@ FORBIDDEN_RUNTIME_PACKAGES = {
     "pydantic-core",
     "pydantic_core",
 }
-PROTECTED_RUNTIME_PACKAGES = {"numpy", "torch"}
+PROTECTED_RUNTIME_PACKAGES = {
+    "filelock",
+    "fsspec",
+    "numpy",
+    "packaging",
+    "pip",
+    "setuptools",
+    "torch",
+    "typing-extensions",
+    "wheel",
+}
 ALLIANCE_WHEELHOUSE_MARKERS = ("computecanada", "alliancecan", "wheelhouse")
 
 
@@ -41,6 +51,16 @@ class SelectedWheel:
     alliance_wheelhouse: bool
     has_local_version: bool
     native_candidate: bool = False
+
+
+@dataclass(frozen=True)
+class ProtectedPackageDecision:
+    """A protected package selected by clean resolution and retained in place."""
+
+    package_name: str
+    installed_version: Version
+    selected_version: Version
+    action: str = "retain"
 
 
 def normalized_package_name(name: str) -> str:
@@ -179,8 +199,6 @@ def validate_unicore_runtime_report_item(item: dict, *, required_wandb: str = "0
     name = normalized_package_name(raw_name)
     version = metadata.get("version", "")
 
-    if name in PROTECTED_RUNTIME_PACKAGES:
-        raise RuntimeError(f"Runtime dependency resolution would replace protected package {raw_name}.")
     if name in FORBIDDEN_RUNTIME_PACKAGES:
         raise RuntimeError(f"Runtime dependency resolution selected forbidden package {raw_name}.")
     if name == "wandb" and Version(version).base_version != required_wandb:
@@ -202,6 +220,41 @@ def validate_unicore_runtime_report_item(item: dict, *, required_wandb: str = "0
             raise RuntimeError(f"Runtime dependency {raw_name} declares forbidden dependency {requirement_text}.")
 
     return selected
+
+
+def validate_protected_package_candidate(
+    item: dict,
+    installed_versions: dict[str, str],
+) -> ProtectedPackageDecision | None:
+    """Validate that a protected clean-resolution candidate matches installed metadata exactly."""
+
+    metadata = item.get("metadata", {})
+    raw_name = metadata.get("name", "")
+    name = normalized_package_name(raw_name)
+    if name not in PROTECTED_RUNTIME_PACKAGES:
+        return None
+
+    selected_text = metadata.get("version", "")
+    installed_text = installed_versions.get(name)
+    if installed_text is None:
+        raise RuntimeError(
+            "Protected package metadata is missing for clean-resolution candidate "
+            f"{raw_name or name} selected={selected_text or '<unknown>'}."
+        )
+
+    installed = Version(installed_text)
+    selected = Version(selected_text)
+    if installed != selected:
+        raise RuntimeError(
+            "Protected package clean-resolution candidate differs from installed distribution: "
+            f"{raw_name or name} installed={installed} selected={selected}."
+        )
+
+    return ProtectedPackageDecision(
+        package_name=name,
+        installed_version=installed,
+        selected_version=selected,
+    )
 
 
 def validate_unicore_runtime_report(payload: dict, *, required_wandb: str = "0.17.9") -> list[SelectedWheel]:

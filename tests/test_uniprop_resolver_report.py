@@ -6,6 +6,7 @@ from packaging.tags import Tag
 from chemfluor.uniprop.resolver_report import (
     decoded_artifact_filename,
     parse_selected_wheel,
+    validate_protected_package_candidate,
     validate_lmdb_native_candidate,
     validate_report_item_wheel,
     validate_unicore_runtime_report,
@@ -205,14 +206,67 @@ def test_runtime_validation_rejects_forbidden_selected_packages() -> None:
         )
 
 
-def test_runtime_validation_rejects_numpy_or_torch_replacement() -> None:
-    with pytest.raises(RuntimeError, match="replace protected package"):
-        validate_unicore_runtime_report_item(
+def test_runtime_validation_allows_protected_packages_in_clean_resolution() -> None:
+    selected = validate_unicore_runtime_report_item(
+        _item(
+            "numpy",
+            "2.2.2+computecanada",
+            "file:///wheelhouse/numpy-2.2.2%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
+        )
+    )
+
+    assert selected.report_name == "numpy"
+
+
+def test_protected_candidate_accepts_exact_installed_selected_equality() -> None:
+    decision = validate_protected_package_candidate(
+        _item(
+            "numpy",
+            "2.2.2+computecanada",
+            "file:///wheelhouse/numpy-2.2.2%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
+        ),
+        {"numpy": "2.2.2+computecanada"},
+    )
+
+    assert decision is not None
+    assert str(decision.installed_version) == "2.2.2+computecanada"
+    assert str(decision.selected_version) == "2.2.2+computecanada"
+    assert decision.action == "retain"
+
+
+@pytest.mark.parametrize(
+    ("installed", "selected", "match"),
+    [
+        ("2.2.2", "2.2.2+computecanada", "installed=2.2.2 selected=2.2.2\\+computecanada"),
+        ("2.2.2+other", "2.2.2+computecanada", "installed=2.2.2\\+other selected=2.2.2\\+computecanada"),
+        ("2.2.1+computecanada", "2.2.2+computecanada", "installed=2.2.1\\+computecanada selected=2.2.2\\+computecanada"),
+    ],
+)
+def test_protected_candidate_rejects_exact_version_mismatches(
+    installed: str,
+    selected: str,
+    match: str,
+) -> None:
+    with pytest.raises(RuntimeError, match=match):
+        validate_protected_package_candidate(
+            _item(
+                "numpy",
+                selected,
+                f"file:///wheelhouse/numpy-{selected.replace('+', '%2B')}-cp310-cp310-linux_x86_64.whl",
+            ),
+            {"numpy": installed},
+        )
+
+
+def test_protected_candidate_missing_installed_metadata_fails_clearly() -> None:
+    with pytest.raises(RuntimeError, match="metadata is missing.*numpy.*selected=2.2.2\\+computecanada"):
+        validate_protected_package_candidate(
             _item(
                 "numpy",
                 "2.2.2+computecanada",
                 "file:///wheelhouse/numpy-2.2.2%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
-            )
+            ),
+            {},
         )
 
 
