@@ -1,5 +1,5 @@
 Would install:
-  numpy-2.2.2+computecanada
+  numpy-2.1.1+computecanada
   packaging-26.2+computecanada
   setuptools-83.0.0+computecanada
 

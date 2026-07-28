@@ -30,7 +30,7 @@ UPSTREAM_DIR="third_party/nablacolors"
 REVISION_FILE="third_party/nablacolors.REVISION"
 REPO_URL=""
 TORCH_SPEC="${FLUORCAST_UNIPROP_TORCH_SPEC:-torch==2.6.*}"
-NUMPY_SPEC="${FLUORCAST_UNIPROP_NUMPY_REQUIREMENT:-${FLUORCAST_UNIPROP_NUMPY_SPEC:-numpy==2.2.2}}"
+NUMPY_SPEC="${FLUORCAST_UNIPROP_NUMPY_REQUIREMENT:-${FLUORCAST_UNIPROP_NUMPY_SPEC:-numpy==2.1.1}}"
 ENABLE_CUDA_EXT=0
 CLEAN=0
 DRY_RUN=0
@@ -199,6 +199,7 @@ fi
 UNICORE_DIR="$UPSTREAM_DIR/Uni-Core"
 UNIMOL_PLUS_DIR="$UPSTREAM_DIR/unimol_plus"
 UNICORE_RUNTIME_REQUIREMENTS="configs/uniprop/unicore_runtime_requirements.txt"
+UNIMOL_PLUS_RUNTIME_REQUIREMENTS="configs/uniprop/unimol_plus_runtime_requirements.txt"
 VENV_PYTHON="$VENV_DIR/bin/python"
 
 echo "UniProp bootstrap mode: $MODE"
@@ -209,10 +210,12 @@ echo "Virtual environment: $VENV_DIR"
 echo "PyTorch requirement: $TORCH_SPEC"
 echo "NumPy requirement: $NUMPY_SPEC"
 echo "Uni-Core runtime requirements: $UNICORE_RUNTIME_REQUIREMENTS"
+echo "Uni-Mol+ runtime requirements: $UNIMOL_PLUS_RUNTIME_REQUIREMENTS"
 export FLUORCAST_UNIPROP_BOOTSTRAP_MODE="$MODE"
 export FLUORCAST_UNIPROP_TORCH_SPEC="$TORCH_SPEC"
 export FLUORCAST_UNIPROP_NUMPY_REQUIREMENT="$NUMPY_SPEC"
 export FLUORCAST_UNIPROP_RUNTIME_REQUIREMENTS="$UNICORE_RUNTIME_REQUIREMENTS"
+export FLUORCAST_UNIPROP_UNIMOL_PLUS_RUNTIME_REQUIREMENTS="$UNIMOL_PLUS_RUNTIME_REQUIREMENTS"
 
 stage "Pinned upstream checkout"
 if [[ -d "$UPSTREAM_DIR" ]]; then
@@ -249,6 +252,9 @@ if [[ "$DRY_RUN" -eq 0 && ! -d "$UNIMOL_PLUS_DIR" ]]; then
 fi
 if [[ "$DRY_RUN" -eq 0 && ! -f "$UNICORE_RUNTIME_REQUIREMENTS" ]]; then
     fail "Uni-Core runtime requirements file is missing: $UNICORE_RUNTIME_REQUIREMENTS"
+fi
+if [[ "$DRY_RUN" -eq 0 && ! -f "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS" ]]; then
+    fail "Uni-Mol+ runtime requirements file is missing: $UNIMOL_PLUS_RUNTIME_REQUIREMENTS"
 fi
 
 stage "Python 3.10 virtual environment"
@@ -345,6 +351,7 @@ from packaging.requirements import Requirement
 from packaging.version import Version
 
 import numpy
+from importlib.metadata import version
 
 requested = os.environ["FLUORCAST_UNIPROP_NUMPY_REQUIREMENT"]
 requirement = Requirement(requested)
@@ -356,10 +363,12 @@ expected_versions = [
 if len(expected_versions) != 1:
     raise SystemExit(f"NumPy requirement must be an exact public-version pin, got {requested!r}.")
 expected_base = Version(expected_versions[0]).base_version
-installed = Version(numpy.__version__)
+distribution_version = version("numpy")
+installed = Version(distribution_version)
 print("NumPy diagnostic:")
 print(f"  Requested NumPy requirement: {requested}")
-print(f"  Installed NumPy version: {numpy.__version__}")
+print(f"  NumPy distribution version: {distribution_version}")
+print(f"  NumPy runtime version: {numpy.__version__}")
 print(f"  NumPy import path: {getattr(numpy, '__file__', None)}")
 print(f"  Installed NumPy has Alliance/local suffix: {installed.local is not None}")
 print(f"  Python executable: {sys.executable}")
@@ -837,6 +846,272 @@ for name in optional:
 PY
 )" || fail "Uni-Core required imports are unavailable."
 
+stage "Uni-Mol+ runtime dependency resolver preflight"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf 'DRY-RUN: Uni-Mol+ runtime dry-run intentionally uses --ignore-installed to validate Numba and llvmlite candidates.\n'
+    run_cmd "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --only-binary=:all: --report "<unimol-plus-runtime-report>" -r "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS"
+else
+    UNIMOL_PLUS_RUNTIME_REPORT="$(mktemp)"
+    if ! "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --only-binary=:all: --report "$UNIMOL_PLUS_RUNTIME_REPORT" -r "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS"; then
+        rm -f "$UNIMOL_PLUS_RUNTIME_REPORT"
+        fail "No compatible binary candidate exists for one or more Uni-Mol+ runtime dependencies."
+    fi
+    PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PYTHON" - "$UNIMOL_PLUS_RUNTIME_REPORT" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+from packaging.requirements import Requirement
+from chemfluor.uniprop.resolver_report import (
+    PROTECTED_RUNTIME_PACKAGES,
+    validate_protected_package_candidate,
+    validate_unimol_plus_runtime_report_item,
+    normalized_package_name,
+)
+from importlib.metadata import PackageNotFoundError, version
+
+requirements_path = Path(os.environ["FLUORCAST_UNIPROP_UNIMOL_PLUS_RUNTIME_REQUIREMENTS"])
+requirements = [
+    Requirement(line.strip())
+    for line in requirements_path.read_text(encoding="utf-8").splitlines()
+    if line.strip() and not line.strip().startswith("#")
+]
+required_pins = {"numba": "==0.61.0", "llvmlite": "==0.44.0"}
+seen_requirements = {normalized_package_name(req.name): str(req.specifier) for req in requirements}
+if seen_requirements != required_pins:
+    raise SystemExit(
+        "Uni-Mol+ runtime requirements must pin numba==0.61.0 and llvmlite==0.44.0 only."
+    )
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+items = payload.get("install", [])
+seen = set()
+protected_versions = {}
+for name in sorted(PROTECTED_RUNTIME_PACKAGES):
+    try:
+        protected_versions[name] = str(version(name))
+    except PackageNotFoundError:
+        continue
+print("Uni-Mol+ runtime dependency clean-resolution dry-run selection:")
+print("  dry_run_uses_ignore_installed=True")
+for item in items:
+    metadata = item.get("metadata", {})
+    raw_name = metadata.get("name", "")
+    name = normalized_package_name(raw_name)
+    if name in required_pins:
+        try:
+            selected = validate_unimol_plus_runtime_report_item(item)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
+        seen.add(selected.parsed_name)
+    else:
+        try:
+            protected_decision = validate_protected_package_candidate(item, protected_versions)
+        except RuntimeError as exc:
+            raise SystemExit(str(exc)) from exc
+        if protected_decision is None:
+            raise SystemExit(f"Uni-Mol+ runtime resolver selected unexpected package {raw_name or name}.")
+        selected = None
+        print("Protected package consistency:")
+        print(f"  {protected_decision.package_name}")
+        print(f"  installed={protected_decision.installed_version}")
+        print(f"  selected={protected_decision.selected_version}")
+        print(f"  action={protected_decision.action}")
+        print(
+            "Protected package candidate matches installed distribution: "
+            f"{protected_decision.package_name} {protected_decision.installed_version}"
+        )
+        continue
+    wheel_tags = ",".join(sorted(str(tag) for tag in selected.wheel_tags))
+    print(f"  name={selected.report_name}")
+    print(f"  selected version={selected.report_version}")
+    print(f"  original URL={selected.original_url}")
+    print(f"  decoded filename={selected.decoded_filename}")
+    print(f"  parsed wheel name={selected.parsed_name}")
+    print(f"  parsed wheel version={selected.parsed_version}")
+    print(f"  wheel tags={wheel_tags}")
+    print(f"  matching sys tag={selected.matching_sys_tag}")
+    print(f"  Alliance wheelhouse status={selected.alliance_wheelhouse}")
+    print(f"  local-version status={selected.has_local_version}")
+    print(f"  native candidate status={selected.native_candidate}")
+    if normalized_package_name(raw_name) == "numba":
+        print("  Numba native candidate validated.")
+    if normalized_package_name(raw_name) == "llvmlite":
+        print("  llvmlite native candidate validated.")
+missing = sorted(set(required_pins) - seen)
+if missing:
+    raise SystemExit(f"pip dry-run did not select required Uni-Mol+ runtime wheels: {', '.join(missing)}")
+print("Validated wheel-only Uni-Mol+ runtime dependency dry-run report.")
+PY
+    rm -f "$UNIMOL_PLUS_RUNTIME_REPORT"
+fi
+
+stage "Uni-Mol+ runtime dependencies"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf 'DRY-RUN: Protected package audit would confirm NumPy and other bootstrap packages are retained before Numba install.\n'
+else
+    PROTECTED_UNIMOL_PLUS_RUNTIME_BEFORE="$(mktemp)"
+    PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PYTHON" - "$PROTECTED_UNIMOL_PLUS_RUNTIME_BEFORE" <<'PY'
+import json
+import sys
+from importlib import metadata
+from importlib.metadata import PackageNotFoundError
+from pathlib import Path
+from packaging.version import Version
+from chemfluor.uniprop.resolver_report import PROTECTED_RUNTIME_PACKAGES
+
+venv = Path(sys.prefix).resolve()
+snapshot = {}
+for name in sorted(PROTECTED_RUNTIME_PACKAGES):
+    try:
+        dist = metadata.distribution(name)
+    except PackageNotFoundError as exc:
+        raise SystemExit(f"Protected package metadata missing before Uni-Mol+ runtime install: {name}") from exc
+    location = Path(dist.locate_file("")).resolve()
+    version = str(Version(dist.version))
+    snapshot[name] = {"version": version, "location": str(location)}
+    if location != venv and venv not in location.parents:
+        raise SystemExit(f"Protected package {name} is outside .venv-uniprop before Uni-Mol+ runtime install: {location}")
+Path(sys.argv[1]).write_text(json.dumps(snapshot, indent=2, sort_keys=True), encoding="utf-8")
+print("Protected package pre-Uni-Mol+ runtime snapshot:")
+for name, data in snapshot.items():
+    print(f"  {name}: version={data['version']} location={data['location']}")
+PY
+fi
+run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -r "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS" || fail "Uni-Mol+ runtime dependency installation failed."
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf 'DRY-RUN: Protected package post-Uni-Mol+ runtime audit would compare retained package versions and locations.\n'
+else
+    "$VENV_PYTHON" - "$PROTECTED_UNIMOL_PLUS_RUNTIME_BEFORE" <<'PY'
+import json
+import sys
+from importlib import metadata
+from importlib.metadata import PackageNotFoundError
+from pathlib import Path
+from packaging.version import Version
+
+before = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+venv = Path(sys.prefix).resolve()
+print("Protected package post-Uni-Mol+ runtime audit:")
+for name in sorted(before):
+    before_data = before[name]
+    try:
+        dist = metadata.distribution(name)
+    except PackageNotFoundError as exc:
+        raise SystemExit(f"Protected package disappeared after Uni-Mol+ runtime install: {name}") from exc
+    after_version = str(Version(dist.version))
+    after_location = Path(dist.locate_file("")).resolve()
+    if after_version != before_data["version"]:
+        raise SystemExit(
+            f"Protected package version changed after Uni-Mol+ runtime install: "
+            f"{name} before={before_data['version']} after={after_version}"
+        )
+    if str(after_location) != before_data["location"]:
+        raise SystemExit(
+            f"Protected package location changed after Uni-Mol+ runtime install: "
+            f"{name} before={before_data['location']} after={after_location}"
+        )
+    if after_location != venv and venv not in after_location.parents:
+        raise SystemExit(f"Protected package {name} moved outside .venv-uniprop after Uni-Mol+ runtime install: {after_location}")
+    print(f"  {name}: unchanged")
+PY
+    rm -f "$PROTECTED_UNIMOL_PLUS_RUNTIME_BEFORE"
+fi
+
+stage "Numba and llvmlite validation"
+python_here "$(cat <<'PY'
+import sys
+from importlib.metadata import version
+from pathlib import Path
+from packaging.version import Version
+
+import numpy
+import numba
+import llvmlite
+
+venv = Path(sys.prefix).resolve()
+numba_path = Path(numba.__file__).resolve()
+llvmlite_path = Path(llvmlite.__file__).resolve()
+numpy_distribution_version = version("numpy")
+numba_distribution_version = version("numba")
+llvmlite_distribution_version = version("llvmlite")
+print("Numba runtime diagnostic:")
+print(f"  NumPy distribution version: {numpy_distribution_version}")
+print(f"  NumPy runtime version: {numpy.__version__}")
+print(f"  Numba distribution version: {numba_distribution_version}")
+print(f"  Numba runtime version: {numba.__version__}")
+print(f"  llvmlite distribution version: {llvmlite_distribution_version}")
+print(f"  llvmlite runtime version: {llvmlite.__version__}")
+print(f"  Numba package path: {numba_path}")
+print(f"  llvmlite package path: {llvmlite_path}")
+print(f"  Python executable: {sys.executable}")
+print(f"  environment prefix: {sys.prefix}")
+if Version(numpy_distribution_version).base_version != "2.1.1":
+    raise SystemExit(f"NumPy distribution public version must be 2.1.1, got {numpy_distribution_version}.")
+if Version(numba_distribution_version).base_version != "0.61.0":
+    raise SystemExit(f"Numba distribution public version must be 0.61.0, got {numba_distribution_version}.")
+if Version(llvmlite_distribution_version).base_version != "0.44.0":
+    raise SystemExit(f"llvmlite distribution public version must be 0.44.0, got {llvmlite_distribution_version}.")
+if venv not in numba_path.parents:
+    raise SystemExit(f"Numba package is outside .venv-uniprop: {numba_path}")
+if venv not in llvmlite_path.parents:
+    raise SystemExit(f"llvmlite package is outside .venv-uniprop: {llvmlite_path}")
+PY
+)" || fail "Numba and llvmlite validation failed."
+
+stage "Numba compilation smoke test"
+python_here "$(cat <<'PY'
+import numpy as np
+from numba import njit
+
+@njit
+def add_one(values):
+    return values + 1
+
+result = add_one(np.array([1, 2, 3], dtype=np.int32))
+if result.tolist() != [2, 3, 4]:
+    raise RuntimeError(f"Numba basic compilation failed: {result!r}")
+
+@njit
+def floyd_warshall(adjacency):
+    n = adjacency.shape[0]
+    distance = np.empty_like(adjacency)
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                distance[i, j] = 0
+            elif adjacency[i, j] != 0:
+                distance[i, j] = adjacency[i, j]
+            else:
+                distance[i, j] = 999
+    for k in range(n):
+        for i in range(n):
+            for j in range(n):
+                through = distance[i, k] + distance[k, j]
+                if through < distance[i, j]:
+                    distance[i, j] = through
+    return distance
+
+adjacency = np.array(
+    [
+        [0, 1, 0],
+        [1, 0, 1],
+        [0, 1, 0],
+    ],
+    dtype=np.int32,
+)
+expected = [
+    [0, 1, 2],
+    [1, 0, 1],
+    [2, 1, 0],
+]
+shortest_paths = floyd_warshall(adjacency)
+if shortest_paths.tolist() != expected:
+    raise RuntimeError(f"Numba Floyd-Warshall compilation failed: {shortest_paths!r}")
+print("NUMBA_NIBI_COMPATIBILITY_OK")
+PY
+)" || fail "Numba compilation smoke test failed."
+
 stage "Uni-Mol+ direct install"
 run_cmd "$VENV_PYTHON" -m pip install -e "$UNIMOL_PLUS_DIR" || fail "Uni-Mol+ installation failed."
 
@@ -856,6 +1131,10 @@ import torch
 import unicore
 import unimol_plus
 import numpy
+import lmdb
+import lmdb.cpython
+import numba
+import llvmlite
 from unimol_plus.models.uniprop import UniPropModel
 
 upstream_dir = Path(os.environ["FLUORCAST_UNIPROP_UPSTREAM_DIR"])
@@ -877,12 +1156,17 @@ print(f"  NumPy version: {numpy.__version__}")
 print(f"  PyTorch version: {torch.__version__}")
 print(f"  Torch compiled CUDA version: {getattr(torch.version, 'cuda', None)}")
 print(f"  CUDA available at runtime: {torch.cuda.is_available()}")
+print(f"  LMDB version: {getattr(lmdb, '__version__', 'unknown')}")
+print(f"  LMDB native extension path: {getattr(lmdb.cpython, '__file__', None)}")
+print(f"  Numba version: {numba.__version__}")
+print(f"  llvmlite version: {llvmlite.__version__}")
 print(f"  Uni-Core import path: {getattr(unicore, '__file__', None)}")
 print(f"  Uni-Mol+ import path: {getattr(unimol_plus, '__file__', None)}")
 print(f"  Real UniProp model class: {UniPropModel.__module__}.{UniPropModel.__name__}")
 print(f"  Real UniProp model source path: {getattr(model_module, '__file__', None)}")
 print(f"  Pinned upstream Git commit: {actual_commit}")
 print(f"  Feature-schema SHA-256 verified: {schema_hash}")
+print("UNIPROP_NIBI_BOOTSTRAP_OK")
 PY
 )" || fail "Final UniProp import diagnostic failed."
 

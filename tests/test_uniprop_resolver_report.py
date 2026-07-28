@@ -8,9 +8,12 @@ from chemfluor.uniprop.resolver_report import (
     parse_selected_wheel,
     validate_protected_package_candidate,
     validate_lmdb_native_candidate,
+    validate_native_runtime_candidate,
     validate_report_item_wheel,
     validate_unicore_runtime_report,
     validate_unicore_runtime_report_item,
+    validate_unimol_plus_runtime_report,
+    validate_unimol_plus_runtime_report_item,
 )
 
 
@@ -22,6 +25,7 @@ def _item(name: str, version: str, url: str, requires_dist: list[str] | None = N
 
 
 LMDB_CP310_LINUX_TAG = Tag("cp310", "cp310", "linux_x86_64")
+CP310_LINUX_TAG = Tag("cp310", "cp310", "linux_x86_64")
 
 
 @pytest.mark.parametrize("scheme", ["file", "https"])
@@ -29,7 +33,7 @@ LMDB_CP310_LINUX_TAG = Tag("cp310", "cp310", "linux_x86_64")
     ("name", "version", "filename"),
     [
         ("requests", "2.34.2+computecanada", "requests-2.34.2%2Bcomputecanada-py3-none-any.whl"),
-        ("numpy", "2.2.2+computecanada", "numpy-2.2.2%2Bcomputecanada-cp310-cp310-linux_x86_64.whl"),
+        ("numpy", "2.1.1+computecanada", "numpy-2.1.1%2Bcomputecanada-cp310-cp310-linux_x86_64.whl"),
         ("torch", "2.6.0+computecanada", "torch-2.6.0%2Bcomputecanada-cp310-cp310-linux_x86_64.whl"),
     ],
 )
@@ -210,8 +214,8 @@ def test_runtime_validation_allows_protected_packages_in_clean_resolution() -> N
     selected = validate_unicore_runtime_report_item(
         _item(
             "numpy",
-            "2.2.2+computecanada",
-            "file:///wheelhouse/numpy-2.2.2%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
+            "2.1.1+computecanada",
+            "file:///wheelhouse/numpy-2.1.1%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
         )
     )
 
@@ -222,24 +226,24 @@ def test_protected_candidate_accepts_exact_installed_selected_equality() -> None
     decision = validate_protected_package_candidate(
         _item(
             "numpy",
-            "2.2.2+computecanada",
-            "file:///wheelhouse/numpy-2.2.2%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
+            "2.1.1+computecanada",
+            "file:///wheelhouse/numpy-2.1.1%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
         ),
-        {"numpy": "2.2.2+computecanada"},
+        {"numpy": "2.1.1+computecanada"},
     )
 
     assert decision is not None
-    assert str(decision.installed_version) == "2.2.2+computecanada"
-    assert str(decision.selected_version) == "2.2.2+computecanada"
+    assert str(decision.installed_version) == "2.1.1+computecanada"
+    assert str(decision.selected_version) == "2.1.1+computecanada"
     assert decision.action == "retain"
 
 
 @pytest.mark.parametrize(
     ("installed", "selected", "match"),
     [
-        ("2.2.2", "2.2.2+computecanada", "installed=2.2.2 selected=2.2.2\\+computecanada"),
-        ("2.2.2+other", "2.2.2+computecanada", "installed=2.2.2\\+other selected=2.2.2\\+computecanada"),
-        ("2.2.1+computecanada", "2.2.2+computecanada", "installed=2.2.1\\+computecanada selected=2.2.2\\+computecanada"),
+        ("2.1.1", "2.1.1+computecanada", "installed=2.1.1 selected=2.1.1\\+computecanada"),
+        ("2.1.1+other", "2.1.1+computecanada", "installed=2.1.1\\+other selected=2.1.1\\+computecanada"),
+        ("2.1.0+computecanada", "2.1.1+computecanada", "installed=2.1.0\\+computecanada selected=2.1.1\\+computecanada"),
     ],
 )
 def test_protected_candidate_rejects_exact_version_mismatches(
@@ -259,12 +263,12 @@ def test_protected_candidate_rejects_exact_version_mismatches(
 
 
 def test_protected_candidate_missing_installed_metadata_fails_clearly() -> None:
-    with pytest.raises(RuntimeError, match="metadata is missing.*numpy.*selected=2.2.2\\+computecanada"):
+    with pytest.raises(RuntimeError, match="metadata is missing.*numpy.*selected=2.1.1\\+computecanada"):
         validate_protected_package_candidate(
             _item(
                 "numpy",
-                "2.2.2+computecanada",
-                "file:///wheelhouse/numpy-2.2.2%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
+                "2.1.1+computecanada",
+                "file:///wheelhouse/numpy-2.1.1%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
             ),
             {},
         )
@@ -343,6 +347,103 @@ def test_lmdb_wheel_tags_are_compared_against_supported_tags() -> None:
                 "file:///wheelhouse/lmdb-1.4.1%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
             ),
             supported_tags={Tag("cp310", "cp310", "manylinux_2_17_x86_64")},
+        )
+
+
+def test_numba_computecanada_local_version_satisfies_public_policy() -> None:
+    selected = validate_unimol_plus_runtime_report_item(
+        _item(
+            "numba",
+            "0.61.0+computecanada",
+            "file:///cvmfs/soft.computecanada.ca/wheelhouse/numba-0.61.0%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
+        ),
+        supported_tags={CP310_LINUX_TAG},
+    )
+
+    assert selected.parsed_name == "numba"
+    assert selected.parsed_version.base_version == "0.61.0"
+    assert str(selected.parsed_version) == "0.61.0+computecanada"
+    assert selected.native_candidate is True
+    assert selected.matching_sys_tag is not None
+
+
+def test_llvmlite_computecanada_local_version_satisfies_public_policy() -> None:
+    selected = validate_native_runtime_candidate(
+        _item(
+            "llvmlite",
+            "0.44.0+computecanada",
+            "file:///cvmfs/soft.computecanada.ca/wheelhouse/llvmlite-0.44.0%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
+        ),
+        package="llvmlite",
+        public_version="0.44.0",
+        supported_tags={CP310_LINUX_TAG},
+    )
+
+    assert selected.parsed_name == "llvmlite"
+    assert selected.parsed_version.base_version == "0.44.0"
+    assert str(selected.parsed_version) == "0.44.0+computecanada"
+    assert selected.native_candidate is True
+
+
+@pytest.mark.parametrize(
+    ("package", "expected", "version", "filename", "match"),
+    [
+        ("numba", "0.61.0", "0.61.2", "numba-0.61.2-cp310-cp310-linux_x86_64.whl", "public version 0.61.2"),
+        ("llvmlite", "0.44.0", "0.45.0", "llvmlite-0.45.0-cp310-cp310-linux_x86_64.whl", "public version 0.45.0"),
+        ("numba", "0.61.0", "0.61.0", "numba-0.61.0-py3-none-any.whl", "universal"),
+        ("llvmlite", "0.44.0", "0.44.0", "llvmlite-0.44.0-pp310-pypy310_pp73-linux_x86_64.whl", "PyPy"),
+        ("numba", "0.61.0", "0.61.0", "numba-0.61.0-cp311-cp311-linux_x86_64.whl", "not compatible"),
+        ("llvmlite", "0.44.0", "0.44.0", "llvmlite-0.44.0-cp310-cp310-win_amd64.whl", "Linux"),
+    ],
+)
+def test_unimol_plus_native_runtime_policy_rejects_unusable_wheels(
+    package: str,
+    expected: str,
+    version: str,
+    filename: str,
+    match: str,
+) -> None:
+    with pytest.raises(RuntimeError, match=match):
+        validate_native_runtime_candidate(
+            _item(package, version, f"https://example.invalid/{filename}"),
+            package=package,
+            public_version=expected,
+            supported_tags={CP310_LINUX_TAG},
+        )
+
+
+@pytest.mark.parametrize(
+    ("package", "version", "filename"),
+    [
+        ("numba", "0.61.0", "numba-0.61.0.tar.gz"),
+        ("llvmlite", "0.44.0", "llvmlite-0.44.0.zip"),
+    ],
+)
+def test_unimol_plus_runtime_source_archives_are_rejected(package: str, version: str, filename: str) -> None:
+    with pytest.raises(RuntimeError, match="non-wheel artifact"):
+        validate_unimol_plus_runtime_report_item(
+            _item(package, version, f"https://example.invalid/{filename}"),
+            supported_tags={CP310_LINUX_TAG},
+        )
+
+
+def test_unimol_plus_runtime_report_requires_only_numba_stack() -> None:
+    payload = {
+        "install": [
+            _item("numba", "0.61.0", "https://example.invalid/numba-0.61.0-cp310-cp310-linux_x86_64.whl"),
+            _item("llvmlite", "0.44.0", "https://example.invalid/llvmlite-0.44.0-cp310-cp310-linux_x86_64.whl"),
+        ]
+    }
+
+    selected = validate_unimol_plus_runtime_report(payload, supported_tags={CP310_LINUX_TAG})
+
+    assert [wheel.parsed_name for wheel in selected] == ["numba", "llvmlite"]
+
+
+def test_unimol_plus_runtime_report_rejects_unexpected_dependency() -> None:
+    with pytest.raises(RuntimeError, match="unexpected package numpy"):
+        validate_unimol_plus_runtime_report_item(
+            _item("numpy", "2.1.1", "https://example.invalid/numpy-2.1.1-cp310-cp310-linux_x86_64.whl")
         )
 
 

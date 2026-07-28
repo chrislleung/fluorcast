@@ -43,8 +43,14 @@ LMDB_CFFI_COMPILE_FAILURE = (
 PROTECTED_CLEAN_RESOLUTION_FALSE_REPLACEMENT = (
     PROJECT_ROOT / "tests" / "fixtures" / "uniprop_protected_clean_resolution_false_replacement.txt"
 )
+MISSING_NUMBA_IMPORT_FAILURE = (
+    PROJECT_ROOT / "tests" / "fixtures" / "uniprop_missing_numba_import_failure.txt"
+)
 UNICORE_RUNTIME_REQUIREMENTS = (
     PROJECT_ROOT / "configs" / "uniprop" / "unicore_runtime_requirements.txt"
+)
+UNIMOL_PLUS_RUNTIME_REQUIREMENTS = (
+    PROJECT_ROOT / "configs" / "uniprop" / "unimol_plus_runtime_requirements.txt"
 )
 
 
@@ -133,8 +139,10 @@ def test_bootstrap_dry_run_does_not_create_clone_or_venv(tmp_path: Path) -> None
     assert "unimol_env" not in result.stdout
     assert "python=3.12" not in result.stdout
     assert "torch==2.6.*" in result.stdout
-    assert "numpy==2.2.2" in result.stdout
+    assert "numpy==2.1.1" in result.stdout
+    assert "numpy==2.2.2" not in result.stdout
     assert "unicore_runtime_requirements.txt" in result.stdout
+    assert "unimol_plus_runtime_requirements.txt" in result.stdout
     assert "--only-binary=:all:" in result.stdout
     assert "numpy==2.2.6" not in BOOTSTRAP.read_text(encoding="utf-8")
 
@@ -171,11 +179,13 @@ def test_cuda_bootstrap_contract_avoids_upstream_conda_installer() -> None:
     assert "unimol_env" not in text
     assert "python=3.12" not in text
     assert "torch==2.6.*" in text
-    assert "numpy==2.2.2" in text
+    assert "numpy==2.1.1" in text
+    assert "numpy==2.2.2" not in text
     assert "numpy==2.2.6" not in text
     assert "FLUORCAST_UNIPROP_NUMPY_REQUIREMENT" in text
     assert "UNICORE_INSTALL_ARGS=(\"$UNICORE_DIR\")" in text
     assert "UNICORE_RUNTIME_REQUIREMENTS=\"configs/uniprop/unicore_runtime_requirements.txt\"" in text
+    assert "UNIMOL_PLUS_RUNTIME_REQUIREMENTS=\"configs/uniprop/unimol_plus_runtime_requirements.txt\"" in text
     unicore_install = (
         'env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" -m pip install '
         '--no-build-isolation --no-deps "${UNICORE_INSTALL_ARGS[@]}"'
@@ -189,12 +199,16 @@ def test_bootstrap_completion_diagnostic_requires_real_imports() -> None:
     required = [
         "import torch",
         "import numpy",
+        "import lmdb.cpython",
+        "import numba",
+        "import llvmlite",
         "import unicore",
         "import unimol_plus",
         "import wandb",
         "from unimol_plus.models.uniprop import UniPropModel",
         "Feature-schema SHA-256 verified",
         "Pinned upstream Git commit",
+        "UNIPROP_NIBI_BOOTSTRAP_OK",
     ]
     for snippet in required:
         assert snippet in text
@@ -283,17 +297,17 @@ def test_numpy_preflight_uses_structured_pip_report_before_pytorch() -> None:
 def test_numpy_local_alliance_suffix_is_accepted_by_base_version() -> None:
     from packaging.version import Version
 
-    assert Version("2.2.2+computecanada").base_version == "2.2.2"
+    assert Version("2.1.1+computecanada").base_version == "2.1.1"
     text = BOOTSTRAP.read_text(encoding="utf-8")
     assert "Version(selected).base_version" in text
-    assert "Version(numpy.__version__)" in text
+    assert "version(\"numpy\")" in text
     assert "installed.base_version != expected_base" in text
 
 
 def test_unexpected_numpy_public_version_fails_validation() -> None:
     from packaging.version import Version
 
-    assert Version("2.2.6").base_version != "2.2.2"
+    assert Version("2.2.6").base_version != "2.1.1"
     text = BOOTSTRAP.read_text(encoding="utf-8")
     assert "does not match requested" in text
 
@@ -330,6 +344,16 @@ def test_unicore_runtime_requirements_are_explicit_and_do_not_reinstall_torch_nu
     assert "numpy" not in "\n".join(requirements).lower()
 
 
+def test_unimol_plus_runtime_requirements_are_separate_and_explicit() -> None:
+    unicore_requirements = UNICORE_RUNTIME_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+    unimol_plus_requirements = UNIMOL_PLUS_RUNTIME_REQUIREMENTS.read_text(encoding="utf-8").splitlines()
+    assert unimol_plus_requirements == ["numba==0.61.0", "llvmlite==0.44.0"]
+    assert "numba" not in "\n".join(unicore_requirements).lower()
+    assert "llvmlite" not in "\n".join(unicore_requirements).lower()
+    assert "lmdb==1.4.1" in unicore_requirements
+    assert "lmdb" not in "\n".join(unimol_plus_requirements).lower()
+
+
 def test_unicore_runtime_dependencies_are_installed_before_local_unicore() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
     runtime_preflight = text.index('stage "Uni-Core runtime dependency resolver preflight"')
@@ -338,6 +362,73 @@ def test_unicore_runtime_dependencies_are_installed_before_local_unicore() -> No
     lmdb_smoke = text.index('stage "LMDB round-trip smoke test"')
     local_install = text.index('stage "Uni-Core direct install"')
     assert runtime_preflight < runtime_install < lmdb_import < lmdb_smoke < local_install
+
+
+def test_unimol_plus_runtime_dependencies_are_validated_before_unimol_plus_install() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    unicore_import = text.index('stage "Uni-Core post-install validation"')
+    runtime_preflight = text.index('stage "Uni-Mol+ runtime dependency resolver preflight"')
+    runtime_install = text.index('stage "Uni-Mol+ runtime dependencies"')
+    numba_validation = text.index('stage "Numba and llvmlite validation"')
+    numba_smoke = text.index('stage "Numba compilation smoke test"')
+    unimol_install = text.index('stage "Uni-Mol+ direct install"')
+    final_import = text.index('stage "Final import diagnostic"')
+    assert unicore_import < runtime_preflight < runtime_install < numba_validation
+    assert numba_validation < numba_smoke < unimol_install < final_import
+
+
+def test_unimol_plus_runtime_preflight_is_wheel_only_and_native() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    preflight = text.index('stage "Uni-Mol+ runtime dependency resolver preflight"')
+    install = text.index('stage "Uni-Mol+ runtime dependencies"')
+    block = text[preflight:install]
+    assert "--dry-run --ignore-installed --only-binary=:all: --report" in block
+    assert "validate_unimol_plus_runtime_report_item" in block
+    assert "numba==0.61.0" in block
+    assert "llvmlite==0.44.0" in block
+    assert "decoded filename=" in block
+    assert "parsed wheel name=" in block
+    assert "parsed wheel version=" in block
+    assert "wheel tags=" in block
+    assert "matching sys tag=" in block
+    assert "Alliance wheelhouse status=" in block
+    assert "local-version status=" in block
+    assert "native candidate status=" in block
+    assert "pip dry-run did not select required Uni-Mol+ runtime wheels" in block
+    assert "validate_protected_package_candidate" in block
+    assert "Protected package candidate matches installed distribution:" in block
+    assert "Uni-Mol+ runtime resolver selected unexpected package" in block
+
+
+def test_unimol_plus_runtime_failures_stop_before_unimol_plus_install() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    resolver_failure = text.index('fail "No compatible binary candidate exists for one or more Uni-Mol+ runtime dependencies."')
+    install_failure = text.index('fail "Uni-Mol+ runtime dependency installation failed."')
+    validation_failure = text.index('fail "Numba and llvmlite validation failed."')
+    smoke_failure = text.index('fail "Numba compilation smoke test failed."')
+    unimol_install = text.index('stage "Uni-Mol+ direct install"')
+    assert resolver_failure < unimol_install
+    assert install_failure < unimol_install
+    assert validation_failure < unimol_install
+    assert smoke_failure < unimol_install
+
+
+def test_numba_validation_requires_versions_paths_and_compilation_smokes() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    validation = text.index('stage "Numba and llvmlite validation"')
+    smoke = text.index('stage "Numba compilation smoke test"')
+    install = text.index('stage "Uni-Mol+ direct install"')
+    block = text[validation:install]
+    assert 'Version(numpy_distribution_version).base_version != "2.1.1"' in block
+    assert 'Version(numba_distribution_version).base_version != "0.61.0"' in block
+    assert 'Version(llvmlite_distribution_version).base_version != "0.44.0"' in block
+    assert "Numba package is outside .venv-uniprop" in block
+    assert "llvmlite package is outside .venv-uniprop" in block
+    assert "@njit" in block
+    assert "add_one" in block
+    assert "floyd_warshall" in block
+    assert "NUMBA_NIBI_COMPATIBILITY_OK" in block
+    assert validation < smoke < install
 
 
 def test_unicore_runtime_dependency_install_is_wheel_only_and_isolated_normally() -> None:
@@ -411,7 +502,7 @@ def test_clean_resolution_false_replacement_fixture_is_now_retained() -> None:
     fixture = PROTECTED_CLEAN_RESOLUTION_FALSE_REPLACEMENT.read_text(encoding="utf-8")
     text = BOOTSTRAP.read_text(encoding="utf-8")
     assert "Would install:" in fixture
-    assert "numpy-2.2.2+computecanada" in fixture
+    assert "numpy-2.1.1+computecanada" in fixture
     assert "Runtime dependency resolution would replace protected package numpy." in fixture
     assert "Protected package candidate matches installed distribution:" in text
     assert "{protected_decision.package_name} {protected_decision.installed_version}" in text
@@ -544,6 +635,7 @@ def test_unicore_failure_prevents_unimol_plus_attempt() -> None:
     pip_check = text.index('fail "Uni-Core pip check failed."')
     unicore_install = text.index('fail "Uni-Core installation failed."')
     unicore_import = text.index('fail "Uni-Core required imports are unavailable."')
+    unimol_runtime = text.index('stage "Uni-Mol+ runtime dependency resolver preflight"')
     unimol_install = text.index('stage "Uni-Mol+ direct install"')
     assert dependency_resolution < unimol_install
     assert dependency_install < unimol_install
@@ -552,6 +644,7 @@ def test_unicore_failure_prevents_unimol_plus_attempt() -> None:
     assert unicore_install < unimol_install
     assert pip_check < unimol_install
     assert unicore_import < unimol_install
+    assert unicore_import < unimol_runtime
 
 
 def test_unicore_is_not_attempted_when_pytorch_fails() -> None:
@@ -598,6 +691,15 @@ def test_lmdb_failure_fixtures_match_real_regression() -> None:
     assert "ModuleNotFoundError: No module named 'lmdb.cpython'" in native_fixture
     assert "fatal error: lmdb.h: No such file or directory" in cffi_fixture
     assert "cffi.VerificationError" in cffi_fixture
+
+
+def test_missing_numba_fixture_is_classified_as_unimol_plus_runtime_dependency() -> None:
+    fixture = MISSING_NUMBA_IMPORT_FAILURE.read_text(encoding="utf-8")
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    assert "ModuleNotFoundError: No module named 'numba'" in fixture
+    assert "Uni-Mol+ runtime dependencies" in text
+    assert "Numba and llvmlite validation" in text
+    assert text.index('stage "Numba and llvmlite validation"') < text.index('stage "Uni-Mol+ direct install"')
 
 
 def test_optional_cuda_extension_toolkit_guard_is_strict_only_when_requested() -> None:

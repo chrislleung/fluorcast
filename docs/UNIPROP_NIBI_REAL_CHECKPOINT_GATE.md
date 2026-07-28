@@ -63,12 +63,30 @@ The explicit `--mode cuda` flag is required for the Nibi GPU bootstrap. Running
 `bash scripts/bootstrap_uniprop.sh --clean` alone uses the script's CPU default
 and is only suitable for CPU-mode environment checks.
 
-The default NumPy requirement is the public version pin `numpy==2.2.2`. Alliance
+The default NumPy requirement is the public version pin `numpy==2.1.1`. Alliance
 may satisfy that with a local distributor wheel such as
-`2.2.2+computecanada`; the bootstrap validates the public/base version while
+`2.1.1+computecanada`; the bootstrap validates the public/base version while
 allowing that local suffix. The requirement is intentionally not written with
 `+computecanada`, so standard pip version matching can select the Alliance wheel
 without making the script unusable outside that wheelhouse.
+
+This NumPy policy is tied to the final Uni-Mol+ import path. The pinned
+Uni-Mol+ package imports `unimol_plus.data.pcq_dataset`, which imports
+`from numba import njit` but does not declare Numba as a runtime dependency. A
+clean isolated Nibi Python 3.10 probe verified the compatible stack:
+
+```text
+numpy-2.1.1+computecanada
+numba-0.61.0+computecanada
+llvmlite-0.44.0+computecanada
+```
+
+That probe passed `pip check`, imported NumPy, Numba, and llvmlite, imported
+`njit`, compiled a basic `@njit` function, compiled and executed a
+Floyd-Warshall `@njit` function, and printed
+`NUMBA_NIBI_COMPATIBILITY_OK`. Nibi cannot resolve Numba `0.61.2` or newer, and
+the available `numba==0.61.0` stack requires the NumPy 2.1-compatible wheel, so
+the earlier `numpy==2.2.2` bootstrap policy cannot be retained.
 
 The exact CUDA bootstrap command for this Nibi repair is:
 
@@ -174,22 +192,24 @@ the clean-resolution report, the bootstrap reads installed distribution metadata
 with `importlib.metadata.version()` and compares it to the selected report
 version with `packaging.version.Version`. Exact normalized version equality is
 required, including Alliance local labels such as `+computecanada`;
-`2.2.2+computecanada` is not treated as equal to plain `2.2.2` for
+`2.1.1+computecanada` is not treated as equal to plain `2.1.1` for
 protected-package consistency. Matching protected packages are reported as
 retained, for example:
 
 ```text
 Protected package consistency:
   numpy
-  installed=2.2.2+computecanada
-  selected=2.2.2+computecanada
+  installed=2.1.1+computecanada
+  selected=2.1.1+computecanada
   action=retain
-Protected package candidate matches installed distribution: numpy 2.2.2+computecanada
+Protected package candidate matches installed distribution: numpy 2.1.1+computecanada
 ```
 
 This exact protected-package comparison is separate from the established NumPy
 public-version policy, where the bootstrap still requires NumPy public/base
-version `2.2.2` and allows an Alliance local suffix.
+version `2.1.1` and allows an Alliance local suffix. The protected-package
+audit uses `importlib.metadata.version("numpy")` as the exact distribution
+metadata source; NumPy's imported module may report only `2.1.1`.
 
 Every selected package is printed with its report name and version, original
 artifact URL, decoded artifact filename, parsed wheel name and version,
@@ -305,8 +325,47 @@ from package metadata that `pydantic`, `pydantic-core`, and `maturin` are not
 installed. Uni-Mol+ installation and the final `UniPropModel` import happen
 only after these checks pass.
 
+Uni-Mol+ runtime dependencies are intentionally handled separately from
+`configs/uniprop/unicore_runtime_requirements.txt`, because Numba and llvmlite
+are required by pinned Uni-Mol+, not by Uni-Core. The separate file
+`configs/uniprop/unimol_plus_runtime_requirements.txt` contains exactly:
+
+```text
+numba==0.61.0
+llvmlite==0.44.0
+```
+
+Before installing those requirements, the bootstrap runs a structured pip
+dry-run report with `--dry-run`, `--ignore-installed`, `--only-binary=:all:`,
+and `--report`. It validates that selected Numba and llvmlite artifacts have
+the expected public versions, canonical package names, decoded wheel filenames,
+CPython wheel tags, Linux platform tags, and at least one tag intersecting
+`packaging.tags.sys_tags()`. Source archives, universal `py3-none-any`
+llvmlite artifacts, PyPy wheels, incompatible CPython or ABI/platform tags, and
+different public versions are rejected before installation. Diagnostics include
+the selected name and version, original URL, decoded filename, parsed wheel name
+and version, wheel tags, matching sys tag, Alliance-wheelhouse status,
+local-version status, and native-candidate status.
+
+After installing Numba and llvmlite, the bootstrap audits protected packages a
+second time to confirm NumPy, PyTorch, pip, setuptools, wheel, packaging, and
+other protected distributions were retained exactly. It then starts a clean
+subprocess, prints NumPy distribution/runtime versions, Numba
+distribution/runtime versions, llvmlite distribution/runtime versions, package
+paths, the Python executable, and the environment prefix, and requires all
+package paths to live inside `.venv-uniprop`. The validation requires public
+versions `numpy==2.1.1`, `numba==0.61.0`, and `llvmlite==0.44.0`.
+
+The next stage performs real Numba compilation before Uni-Mol+ is installed. It
+compiles and runs a basic `add_one` `@njit` function, then compiles and runs a
+Floyd-Warshall `@njit` function on the integer adjacency matrix
+`[[0, 1, 0], [1, 0, 1], [0, 1, 0]]` and requires
+`[[0, 1, 2], [1, 0, 1], [2, 1, 0]]`. Only after both compilation tests pass does
+the bootstrap print `NUMBA_NIBI_COMPATIBILITY_OK` and continue to the Uni-Mol+
+editable install.
+
 The bootstrap first installs build prerequisites into `.venv-uniprop`, including
-`setuptools`, `wheel`, `packaging`, Alliance-compatible `numpy==2.2.2`, and the
+`setuptools`, `wheel`, `packaging`, Alliance-compatible `numpy==2.1.1`, and the
 requested PyTorch wheel. This removes the PyTorch NumPy initialization warning
 and ensures Uni-Core's build process imports the same environment-installed
 PyTorch package that the final runtime gate will use.
@@ -329,6 +388,11 @@ import sys
 from pathlib import Path
 
 import torch
+import numpy
+import lmdb
+import lmdb.cpython
+import numba
+import llvmlite
 import unicore
 import unimol_plus
 from unimol_plus.models.uniprop import UniPropModel
@@ -339,15 +403,21 @@ schema_hash = hashlib.sha256(Path("configs/uniprop/feature_schema.json").read_by
 print(f"Python executable: {sys.executable}")
 print(f"Python version: {sys.version.split()[0]}")
 print(f"Environment path: {sys.prefix}")
+print(f"NumPy version: {numpy.__version__}")
 print(f"PyTorch version: {torch.__version__}")
 print(f"Torch compiled CUDA version: {getattr(torch.version, 'cuda', None)}")
 print(f"CUDA available at runtime: {torch.cuda.is_available()}")
+print(f"LMDB version: {getattr(lmdb, '__version__', 'unknown')}")
+print(f"LMDB native extension path: {lmdb.cpython.__file__}")
+print(f"Numba version: {numba.__version__}")
+print(f"llvmlite version: {llvmlite.__version__}")
 print(f"Uni-Core import path: {unicore.__file__}")
 print(f"Uni-Mol+ import path: {unimol_plus.__file__}")
 print(f"Real UniProp model class: {UniPropModel.__module__}.{UniPropModel.__name__}")
 print(f"Real UniProp model source path: {model_module.__file__}")
 print(f"Pinned upstream Git commit: {subprocess.check_output(['git', '-C', str(upstream_dir), 'rev-parse', 'HEAD'], text=True).strip()}")
 print(f"Feature-schema SHA-256: {schema_hash}")
+print("UNIPROP_NIBI_BOOTSTRAP_OK")
 PY
 ```
 
@@ -364,7 +434,11 @@ compiled for CUDA `12.2` without failing the bootstrap. When
 `torch.version.cuda` and fails before compilation if they differ; load a CUDA
 module matching the PyTorch build before compiling those optional extensions.
 The default bootstrap still requires all UniProp imports used by this gate to
-succeed.
+succeed. The final import gate imports `numpy`, `torch`, `lmdb`,
+`lmdb.cpython`, `numba`, `llvmlite`, `unicore`, `unimol_plus`, and
+`UniPropModel`, prints runtime provenance including the pinned upstream commit
+and feature-schema hash, and prints `UNIPROP_NIBI_BOOTSTRAP_OK` only after the
+full stack imports successfully.
 
 Stage one checkpoint only:
 

@@ -51,6 +51,7 @@ class SelectedWheel:
     alliance_wheelhouse: bool
     has_local_version: bool
     native_candidate: bool = False
+    matching_sys_tag: Tag | None = None
 
 
 @dataclass(frozen=True)
@@ -190,6 +191,84 @@ def validate_lmdb_native_candidate(
         alliance_wheelhouse=selected.alliance_wheelhouse,
         has_local_version=selected.has_local_version,
         native_candidate=True,
+        matching_sys_tag=next(iter(tags.intersection(compatible_tags))),
+    )
+
+
+def validate_unimol_plus_runtime_report_item(
+    item: dict,
+    *,
+    supported_tags: set[Tag] | frozenset[Tag] | None = None,
+) -> SelectedWheel:
+    """Require Nibi-compatible Uni-Mol+ runtime native wheels."""
+
+    metadata = item.get("metadata", {})
+    name = normalized_package_name(metadata.get("name", ""))
+    expected_versions = {
+        "numba": "0.61.0",
+        "llvmlite": "0.44.0",
+    }
+    expected = expected_versions.get(name)
+    if expected is None:
+        raise RuntimeError(f"Uni-Mol+ runtime resolver selected unexpected package {metadata.get('name', name)}.")
+    return validate_native_runtime_candidate(
+        item,
+        package=name,
+        public_version=expected,
+        supported_tags=supported_tags,
+    )
+
+
+def validate_native_runtime_candidate(
+    item: dict,
+    *,
+    package: str,
+    public_version: str,
+    supported_tags: set[Tag] | frozenset[Tag] | None = None,
+) -> SelectedWheel:
+    """Require a CPython Linux wheel whose tags are supported by this interpreter."""
+
+    selected = validate_report_item_wheel(item)
+    selected_version = Version(selected.report_version)
+    if selected.parsed_name != package:
+        raise RuntimeError(f"{package} policy received non-{package} artifact: {selected.report_name}")
+    if selected_version.base_version != public_version:
+        raise RuntimeError(
+            f"{package} selected public version {selected_version.base_version}; expected {public_version}."
+        )
+    if selected.parsed_version.base_version != public_version:
+        raise RuntimeError(
+            f"{package} wheel public version {selected.parsed_version.base_version}; expected {public_version}."
+        )
+
+    tags = selected.wheel_tags
+    interpreters = {tag.interpreter for tag in tags}
+    platforms = {tag.platform for tag in tags}
+    if any(interpreter.startswith("pp") for interpreter in interpreters):
+        raise RuntimeError(f"{package} PyPy wheels are prohibited: {selected.decoded_filename}")
+    if any(tag.interpreter == "py3" and tag.abi == "none" and tag.platform == "any" for tag in tags):
+        raise RuntimeError(f"{package} universal wheels are prohibited: {selected.decoded_filename}")
+    if not any(interpreter.startswith("cp") for interpreter in interpreters):
+        raise RuntimeError(f"{package} wheel must have a CPython implementation tag: {selected.decoded_filename}")
+    if not any(platform.startswith("linux") or "linux" in platform for platform in platforms):
+        raise RuntimeError(f"{package} wheel must be a Linux platform wheel: {selected.decoded_filename}")
+    compatible_tags = supported_tags if supported_tags is not None else set(sys_tags())
+    matching_tags = tags.intersection(compatible_tags)
+    if not matching_tags:
+        raise RuntimeError(f"{package} wheel tags are not compatible with this Python: {selected.decoded_filename}")
+
+    return SelectedWheel(
+        report_name=selected.report_name,
+        report_version=selected.report_version,
+        original_url=selected.original_url,
+        decoded_filename=selected.decoded_filename,
+        parsed_name=selected.parsed_name,
+        parsed_version=selected.parsed_version,
+        wheel_tags=selected.wheel_tags,
+        alliance_wheelhouse=selected.alliance_wheelhouse,
+        has_local_version=selected.has_local_version,
+        native_candidate=True,
+        matching_sys_tag=next(iter(matching_tags)),
     )
 
 
@@ -260,5 +339,16 @@ def validate_protected_package_candidate(
 def validate_unicore_runtime_report(payload: dict, *, required_wandb: str = "0.17.9") -> list[SelectedWheel]:
     return [
         validate_unicore_runtime_report_item(item, required_wandb=required_wandb)
+        for item in payload.get("install", [])
+    ]
+
+
+def validate_unimol_plus_runtime_report(
+    payload: dict,
+    *,
+    supported_tags: set[Tag] | frozenset[Tag] | None = None,
+) -> list[SelectedWheel]:
+    return [
+        validate_unimol_plus_runtime_report_item(item, supported_tags=supported_tags)
         for item in payload.get("install", [])
     ]
