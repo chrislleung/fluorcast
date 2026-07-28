@@ -1,0 +1,2 @@
+numpy installed=2.1.1+computecanada selected=2.2.2+computecanada
+fsspec installed=2026.6.0+computecanada selected=2026.7.0

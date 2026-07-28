@@ -200,6 +200,7 @@ UNICORE_DIR="$UPSTREAM_DIR/Uni-Core"
 UNIMOL_PLUS_DIR="$UPSTREAM_DIR/unimol_plus"
 UNICORE_RUNTIME_REQUIREMENTS="configs/uniprop/unicore_runtime_requirements.txt"
 UNIMOL_PLUS_RUNTIME_REQUIREMENTS="configs/uniprop/unimol_plus_runtime_requirements.txt"
+BOOTSTRAP_RUNTIME_CONSTRAINTS="configs/uniprop/bootstrap_runtime_constraints.txt"
 VENV_PYTHON="$VENV_DIR/bin/python"
 
 echo "UniProp bootstrap mode: $MODE"
@@ -211,11 +212,13 @@ echo "PyTorch requirement: $TORCH_SPEC"
 echo "NumPy requirement: $NUMPY_SPEC"
 echo "Uni-Core runtime requirements: $UNICORE_RUNTIME_REQUIREMENTS"
 echo "Uni-Mol+ runtime requirements: $UNIMOL_PLUS_RUNTIME_REQUIREMENTS"
+echo "Bootstrap runtime constraints: $BOOTSTRAP_RUNTIME_CONSTRAINTS"
 export FLUORCAST_UNIPROP_BOOTSTRAP_MODE="$MODE"
 export FLUORCAST_UNIPROP_TORCH_SPEC="$TORCH_SPEC"
 export FLUORCAST_UNIPROP_NUMPY_REQUIREMENT="$NUMPY_SPEC"
 export FLUORCAST_UNIPROP_RUNTIME_REQUIREMENTS="$UNICORE_RUNTIME_REQUIREMENTS"
 export FLUORCAST_UNIPROP_UNIMOL_PLUS_RUNTIME_REQUIREMENTS="$UNIMOL_PLUS_RUNTIME_REQUIREMENTS"
+export FLUORCAST_UNIPROP_BOOTSTRAP_RUNTIME_CONSTRAINTS="$BOOTSTRAP_RUNTIME_CONSTRAINTS"
 
 stage "Pinned upstream checkout"
 if [[ -d "$UPSTREAM_DIR" ]]; then
@@ -256,6 +259,9 @@ fi
 if [[ "$DRY_RUN" -eq 0 && ! -f "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS" ]]; then
     fail "Uni-Mol+ runtime requirements file is missing: $UNIMOL_PLUS_RUNTIME_REQUIREMENTS"
 fi
+if [[ "$DRY_RUN" -eq 0 && ! -f "$BOOTSTRAP_RUNTIME_CONSTRAINTS" ]]; then
+    fail "Bootstrap runtime constraints file is missing: $BOOTSTRAP_RUNTIME_CONSTRAINTS"
+fi
 
 stage "Python 3.10 virtual environment"
 if [[ "$CLEAN" -eq 1 ]]; then
@@ -293,12 +299,31 @@ PY
 stage "Build tools"
 run_cmd "$VENV_PYTHON" -m pip install --upgrade pip setuptools wheel packaging
 
+stage "Bootstrap runtime constraints"
+if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf 'DRY-RUN: Bootstrap runtime constraints would be validated from %q\n' "$BOOTSTRAP_RUNTIME_CONSTRAINTS"
+    printf 'DRY-RUN: Effective bootstrap runtime constraints:\n'
+    sed 's/^/  /' "$BOOTSTRAP_RUNTIME_CONSTRAINTS"
+else
+    PYTHONPATH="$PWD/src${PYTHONPATH:+:$PYTHONPATH}" "$VENV_PYTHON" - <<'PY' || fail "Bootstrap runtime constraint validation failed."
+import os
+from pathlib import Path
+from chemfluor.uniprop.resolver_report import format_bootstrap_runtime_constraints
+
+constraints_path = Path(os.environ["FLUORCAST_UNIPROP_BOOTSTRAP_RUNTIME_CONSTRAINTS"])
+lines = format_bootstrap_runtime_constraints(constraints_path.read_text(encoding="utf-8"))
+print("Effective bootstrap runtime constraints:")
+for line in lines:
+    print(f"  {line}")
+PY
+fi
+
 stage "NumPy availability preflight"
 if [[ "$DRY_RUN" -eq 1 ]]; then
-    run_cmd "$VENV_PYTHON" -m pip install --dry-run --report "<numpy-report>" "$NUMPY_SPEC"
+    run_cmd "$VENV_PYTHON" -m pip install --dry-run --report "<numpy-report>" -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" "$NUMPY_SPEC"
 else
     NUMPY_REPORT="$(mktemp)"
-    if ! "$VENV_PYTHON" -m pip install --dry-run --report "$NUMPY_REPORT" "$NUMPY_SPEC"; then
+    if ! "$VENV_PYTHON" -m pip install --dry-run --report "$NUMPY_REPORT" -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" "$NUMPY_SPEC"; then
         rm -f "$NUMPY_REPORT"
         fail "No compatible NumPy wheel found for $NUMPY_SPEC with Python $("$VENV_PYTHON" -c 'import sys; print(sys.version.split()[0])')."
     fi
@@ -343,7 +368,7 @@ PY
 fi
 
 stage "NumPy"
-run_cmd "$VENV_PYTHON" -m pip install "$NUMPY_SPEC"
+run_cmd "$VENV_PYTHON" -m pip install -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" "$NUMPY_SPEC"
 python_here "$(cat <<'PY'
 import os
 import sys
@@ -399,14 +424,14 @@ PY
 )" || fail "Existing PyTorch installation is not compatible."
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
-    run_cmd "$VENV_PYTHON" -m pip install "$TORCH_SPEC"
+    run_cmd "$VENV_PYTHON" -m pip install -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" "$TORCH_SPEC"
 elif ! "$VENV_PYTHON" - <<'PY'
 import importlib.util
 raise SystemExit(0 if importlib.util.find_spec("torch") is not None else 1)
 PY
 then
     TORCH_REPORT="$(mktemp)"
-    if ! "$VENV_PYTHON" -m pip install --dry-run --report "$TORCH_REPORT" "$TORCH_SPEC"; then
+    if ! "$VENV_PYTHON" -m pip install --dry-run --report "$TORCH_REPORT" -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" "$TORCH_SPEC"; then
         rm -f "$TORCH_REPORT"
         fail "No compatible PyTorch wheel found for $TORCH_SPEC with this Python/pip configuration."
     fi
@@ -423,7 +448,7 @@ metadata = torch_item.get("metadata", {})
 download = torch_item.get("download_info", {})
 print(f"Selected PyTorch wheel/version: torch {metadata.get('version')} from {download.get('url', 'configured pip source')}")
 PY
-    run_cmd "$VENV_PYTHON" -m pip install "$TORCH_SPEC"
+    run_cmd "$VENV_PYTHON" -m pip install -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" "$TORCH_SPEC"
     rm -f "$TORCH_REPORT"
 fi
 
@@ -441,10 +466,10 @@ PY
 stage "Uni-Core runtime dependency resolver preflight"
 if [[ "$DRY_RUN" -eq 1 ]]; then
     printf 'DRY-RUN: Uni-Core runtime dry-run intentionally uses --ignore-installed to produce a complete clean-resolution report.\n'
-    run_cmd "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --report "<unicore-runtime-report>" --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"
+    run_cmd "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --report "<unicore-runtime-report>" --only-binary=:all: -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" -r "$UNICORE_RUNTIME_REQUIREMENTS"
 else
     UNICORE_RUNTIME_REPORT="$(mktemp)"
-    if ! "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --report "$UNICORE_RUNTIME_REPORT" --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"; then
+    if ! "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --report "$UNICORE_RUNTIME_REPORT" --only-binary=:all: -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" -r "$UNICORE_RUNTIME_REQUIREMENTS"; then
         rm -f "$UNICORE_RUNTIME_REPORT"
         fail "No compatible binary candidate exists for one or more Uni-Core runtime dependencies."
     fi
@@ -573,7 +598,7 @@ for name, data in snapshot.items():
     print(f"  {name}: version={data['version']} location={data['location']}")
 PY
 fi
-run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS" || fail "Uni-Core runtime dependency installation failed."
+run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" -r "$UNICORE_RUNTIME_REQUIREMENTS" || fail "Uni-Core runtime dependency installation failed."
 if [[ "$DRY_RUN" -eq 1 ]]; then
     printf 'DRY-RUN: Protected package post-install audit would compare retained package versions and locations.\n'
 else
@@ -849,10 +874,10 @@ PY
 stage "Uni-Mol+ runtime dependency resolver preflight"
 if [[ "$DRY_RUN" -eq 1 ]]; then
     printf 'DRY-RUN: Uni-Mol+ runtime dry-run intentionally uses --ignore-installed to validate Numba and llvmlite candidates.\n'
-    run_cmd "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --only-binary=:all: --report "<unimol-plus-runtime-report>" -r "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS"
+    run_cmd "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --only-binary=:all: --report "<unimol-plus-runtime-report>" -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" -r "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS"
 else
     UNIMOL_PLUS_RUNTIME_REPORT="$(mktemp)"
-    if ! "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --only-binary=:all: --report "$UNIMOL_PLUS_RUNTIME_REPORT" -r "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS"; then
+    if ! "$VENV_PYTHON" -m pip install --dry-run --ignore-installed --only-binary=:all: --report "$UNIMOL_PLUS_RUNTIME_REPORT" -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" -r "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS"; then
         rm -f "$UNIMOL_PLUS_RUNTIME_REPORT"
         fail "No compatible binary candidate exists for one or more Uni-Mol+ runtime dependencies."
     fi
@@ -978,7 +1003,7 @@ for name, data in snapshot.items():
     print(f"  {name}: version={data['version']} location={data['location']}")
 PY
 fi
-run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -r "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS" || fail "Uni-Mol+ runtime dependency installation failed."
+run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" -r "$UNIMOL_PLUS_RUNTIME_REQUIREMENTS" || fail "Uni-Mol+ runtime dependency installation failed."
 if [[ "$DRY_RUN" -eq 1 ]]; then
     printf 'DRY-RUN: Protected package post-Uni-Mol+ runtime audit would compare retained package versions and locations.\n'
 else
@@ -1113,7 +1138,7 @@ PY
 )" || fail "Numba compilation smoke test failed."
 
 stage "Uni-Mol+ direct install"
-run_cmd "$VENV_PYTHON" -m pip install -e "$UNIMOL_PLUS_DIR" || fail "Uni-Mol+ installation failed."
+run_cmd "$VENV_PYTHON" -m pip install -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" -e "$UNIMOL_PLUS_DIR" || fail "Uni-Mol+ installation failed."
 
 stage "Final import diagnostic"
 export FLUORCAST_UNIPROP_UPSTREAM_DIR="$UPSTREAM_DIR"

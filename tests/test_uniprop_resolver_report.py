@@ -6,6 +6,8 @@ from packaging.tags import Tag
 from chemfluor.uniprop.resolver_report import (
     decoded_artifact_filename,
     parse_selected_wheel,
+    parse_bootstrap_runtime_constraints,
+    public_constraint_allows_distribution,
     validate_protected_package_candidate,
     validate_lmdb_native_candidate,
     validate_native_runtime_candidate,
@@ -236,6 +238,148 @@ def test_protected_candidate_accepts_exact_installed_selected_equality() -> None
     assert str(decision.installed_version) == "2.1.1+computecanada"
     assert str(decision.selected_version) == "2.1.1+computecanada"
     assert decision.action == "retain"
+
+
+def test_protected_candidate_rejects_unconstrained_numpy_and_fsspec_upgrades() -> None:
+    with pytest.raises(RuntimeError, match="numpy installed=2.1.1\\+computecanada selected=2.2.2\\+computecanada"):
+        validate_protected_package_candidate(
+            _item(
+                "numpy",
+                "2.2.2+computecanada",
+                "file:///wheelhouse/numpy-2.2.2%2Bcomputecanada-cp310-cp310-linux_x86_64.whl",
+            ),
+            {"numpy": "2.1.1+computecanada"},
+        )
+    with pytest.raises(RuntimeError, match="fsspec installed=2026.6.0\\+computecanada selected=2026.7.0"):
+        validate_protected_package_candidate(
+            _item(
+                "fsspec",
+                "2026.7.0",
+                "https://example.invalid/fsspec-2026.7.0-py3-none-any.whl",
+            ),
+            {"fsspec": "2026.6.0+computecanada"},
+        )
+
+
+def test_bootstrap_runtime_constraints_require_exact_expected_public_pins() -> None:
+    parsed = parse_bootstrap_runtime_constraints(
+        "\n".join(
+            [
+                "numpy==2.1.1",
+                "torch==2.6.0",
+                "filelock==3.32.0",
+                "fsspec==2026.6.0",
+                "typing-extensions==4.16.0",
+                "packaging==26.2",
+                "setuptools==83.0.0",
+                "wheel==0.47.0",
+                "numba==0.61.0",
+                "llvmlite==0.44.0",
+            ]
+        )
+    )
+
+    assert sorted(parsed) == [
+        "filelock",
+        "fsspec",
+        "llvmlite",
+        "numba",
+        "numpy",
+        "packaging",
+        "setuptools",
+        "torch",
+        "typing-extensions",
+        "wheel",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("text", "match"),
+    [
+        ("numpy==2.1.1\n", "Missing bootstrap runtime constraints"),
+        (
+            "\n".join(
+                [
+                    "numpy==2.1.1",
+                    "numpy==2.1.1",
+                    "torch==2.6.0",
+                    "filelock==3.32.0",
+                    "fsspec==2026.6.0",
+                    "typing-extensions==4.16.0",
+                    "packaging==26.2",
+                    "setuptools==83.0.0",
+                    "wheel==0.47.0",
+                    "numba==0.61.0",
+                    "llvmlite==0.44.0",
+                ]
+            ),
+            "Duplicate bootstrap runtime constraint for numpy",
+        ),
+        (
+            "\n".join(
+                [
+                    "numpy==2.2.2",
+                    "torch==2.6.0",
+                    "filelock==3.32.0",
+                    "fsspec==2026.6.0",
+                    "typing-extensions==4.16.0",
+                    "packaging==26.2",
+                    "setuptools==83.0.0",
+                    "wheel==0.47.0",
+                    "numba==0.61.0",
+                    "llvmlite==0.44.0",
+                ]
+            ),
+            "Contradictory bootstrap runtime constraint for numpy",
+        ),
+        (
+            "\n".join(
+                [
+                    "numpy==2.1.1",
+                    "torch==2.6.0",
+                    "filelock==3.32.0",
+                    "fsspec==2026.7.0",
+                    "typing-extensions==4.16.0",
+                    "packaging==26.2",
+                    "setuptools==83.0.0",
+                    "wheel==0.47.0",
+                    "numba==0.61.0",
+                    "llvmlite==0.44.0",
+                ]
+            ),
+            "Contradictory bootstrap runtime constraint for fsspec",
+        ),
+        (
+            "\n".join(
+                [
+                    "numpy==2.1.1+computecanada",
+                    "torch==2.6.0",
+                    "filelock==3.32.0",
+                    "fsspec==2026.6.0",
+                    "typing-extensions==4.16.0",
+                    "packaging==26.2",
+                    "setuptools==83.0.0",
+                    "wheel==0.47.0",
+                    "numba==0.61.0",
+                    "llvmlite==0.44.0",
+                ]
+            ),
+            "must omit Alliance/local suffixes",
+        ),
+    ],
+)
+def test_bootstrap_runtime_constraints_fail_clearly(text: str, match: str) -> None:
+    with pytest.raises(RuntimeError, match=match):
+        parse_bootstrap_runtime_constraints(text)
+
+
+def test_public_bootstrap_constraints_accept_alliance_local_distributions() -> None:
+    assert public_constraint_allows_distribution("numpy==2.1.1", "2.1.1+computecanada")
+    assert public_constraint_allows_distribution("fsspec==2026.6.0", "2026.6.0+computecanada")
+    assert public_constraint_allows_distribution("typing-extensions==4.16.0", "4.16.0+computecanada")
+    assert public_constraint_allows_distribution("packaging==26.2", "26.2+computecanada")
+    assert public_constraint_allows_distribution("numba==0.61.0", "0.61.0+computecanada")
+    assert public_constraint_allows_distribution("llvmlite==0.44.0", "0.44.0+computecanada")
 
 
 @pytest.mark.parametrize(

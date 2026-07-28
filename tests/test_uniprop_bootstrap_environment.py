@@ -52,6 +52,12 @@ UNICORE_RUNTIME_REQUIREMENTS = (
 UNIMOL_PLUS_RUNTIME_REQUIREMENTS = (
     PROJECT_ROOT / "configs" / "uniprop" / "unimol_plus_runtime_requirements.txt"
 )
+BOOTSTRAP_RUNTIME_CONSTRAINTS = (
+    PROJECT_ROOT / "configs" / "uniprop" / "bootstrap_runtime_constraints.txt"
+)
+PROTECTED_CLEAN_RESOLUTION_UNCONSTRAINED_MISMATCH = (
+    PROJECT_ROOT / "tests" / "fixtures" / "uniprop_protected_clean_resolution_unconstrained_mismatch.txt"
+)
 
 
 def _bash() -> str:
@@ -141,6 +147,8 @@ def test_bootstrap_dry_run_does_not_create_clone_or_venv(tmp_path: Path) -> None
     assert "torch==2.6.*" in result.stdout
     assert "numpy==2.1.1" in result.stdout
     assert "numpy==2.2.2" not in result.stdout
+    assert "bootstrap_runtime_constraints.txt" in result.stdout
+    assert " -c configs/uniprop/bootstrap_runtime_constraints.txt" in result.stdout
     assert "unicore_runtime_requirements.txt" in result.stdout
     assert "unimol_plus_runtime_requirements.txt" in result.stdout
     assert "--only-binary=:all:" in result.stdout
@@ -186,12 +194,13 @@ def test_cuda_bootstrap_contract_avoids_upstream_conda_installer() -> None:
     assert "UNICORE_INSTALL_ARGS=(\"$UNICORE_DIR\")" in text
     assert "UNICORE_RUNTIME_REQUIREMENTS=\"configs/uniprop/unicore_runtime_requirements.txt\"" in text
     assert "UNIMOL_PLUS_RUNTIME_REQUIREMENTS=\"configs/uniprop/unimol_plus_runtime_requirements.txt\"" in text
+    assert "BOOTSTRAP_RUNTIME_CONSTRAINTS=\"configs/uniprop/bootstrap_runtime_constraints.txt\"" in text
     unicore_install = (
         'env SETUPTOOLS_USE_DISTUTILS=stdlib "$VENV_PYTHON" -m pip install '
         '--no-build-isolation --no-deps "${UNICORE_INSTALL_ARGS[@]}"'
     )
     assert unicore_install in text
-    assert "pip install -e \"$UNIMOL_PLUS_DIR\"" in text
+    assert 'pip install -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" -e "$UNIMOL_PLUS_DIR"' in text
 
 
 def test_bootstrap_completion_diagnostic_requires_real_imports() -> None:
@@ -232,7 +241,7 @@ def test_bootstrap_stages_stop_on_install_failures() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
     assert 'fail "No compatible NumPy wheel found' in text
     assert 'fail "NumPy validation failed."' in text
-    assert 'pip install "$TORCH_SPEC"' in text
+    assert 'pip install -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" "$TORCH_SPEC"' in text
     assert 'fail "Uni-Core build prerequisites are unavailable."' in text
     assert 'fail "No compatible PyTorch wheel found' in text
     assert 'fail "PyTorch validation failed."' in text
@@ -279,7 +288,7 @@ def test_cuda_mode_is_preserved_when_explicitly_supplied(tmp_path: Path) -> None
 def test_bootstrap_installs_numpy_before_torch_runtime_diagnostic() -> None:
     text = BOOTSTRAP.read_text(encoding="utf-8")
     numpy_preflight = text.index('stage "NumPy availability preflight"')
-    numpy_install = text.index('pip install "$NUMPY_SPEC"')
+    numpy_install = text.index('pip install -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" "$NUMPY_SPEC"')
     torch_stage = text.index('stage "PyTorch"')
     torch_diagnostic = text.index("PyTorch version: {torch.__version__}")
     assert numpy_preflight < numpy_install < torch_stage < torch_diagnostic
@@ -292,6 +301,38 @@ def test_numpy_preflight_uses_structured_pip_report_before_pytorch() -> None:
     assert "pip install --dry-run --report" in text[preflight:pytorch]
     assert "Selected NumPy wheel/version" in text[preflight:pytorch]
     assert "metadata" in text[preflight:pytorch]
+    assert '-c "$BOOTSTRAP_RUNTIME_CONSTRAINTS"' in text[preflight:pytorch]
+
+
+def test_authoritative_bootstrap_runtime_constraints_file_exists_and_pins_stack() -> None:
+    from chemfluor.uniprop.resolver_report import parse_bootstrap_runtime_constraints
+
+    text = BOOTSTRAP_RUNTIME_CONSTRAINTS.read_text(encoding="utf-8")
+    constraints = parse_bootstrap_runtime_constraints(text)
+    assert {name: str(policy.public_version) for name, policy in constraints.items()} == {
+        "filelock": "3.32.0",
+        "fsspec": "2026.6.0",
+        "llvmlite": "0.44.0",
+        "numba": "0.61.0",
+        "numpy": "2.1.1",
+        "packaging": "26.2",
+        "setuptools": "83.0.0",
+        "torch": "2.6.0",
+        "typing-extensions": "4.16.0",
+        "wheel": "0.47.0",
+    }
+    assert "+computecanada" not in text
+    assert "numpy==2.2.2" not in text
+    assert "fsspec==2026.7.0" not in text
+
+
+def test_bootstrap_validates_constraints_before_numpy_resolution() -> None:
+    text = BOOTSTRAP.read_text(encoding="utf-8")
+    constraints_stage = text.index('stage "Bootstrap runtime constraints"')
+    numpy_preflight = text.index('stage "NumPy availability preflight"')
+    assert constraints_stage < numpy_preflight
+    assert "format_bootstrap_runtime_constraints" in text[constraints_stage:numpy_preflight]
+    assert "Effective bootstrap runtime constraints:" in text[constraints_stage:numpy_preflight]
 
 
 def test_numpy_local_alliance_suffix_is_accepted_by_base_version() -> None:
@@ -383,6 +424,7 @@ def test_unimol_plus_runtime_preflight_is_wheel_only_and_native() -> None:
     install = text.index('stage "Uni-Mol+ runtime dependencies"')
     block = text[preflight:install]
     assert "--dry-run --ignore-installed --only-binary=:all: --report" in block
+    assert '-c "$BOOTSTRAP_RUNTIME_CONSTRAINTS"' in block
     assert "validate_unimol_plus_runtime_report_item" in block
     assert "numba==0.61.0" in block
     assert "llvmlite==0.44.0" in block
@@ -443,6 +485,8 @@ def test_unicore_runtime_dependency_install_is_wheel_only_and_isolated_normally(
     assert "--ignore-installed" in resolver_block
     assert "--only-binary=:all:" in resolver_block
     assert "--only-binary=:all:" in install_block
+    assert '-c "$BOOTSTRAP_RUNTIME_CONSTRAINTS"' in resolver_block
+    assert '-c "$BOOTSTRAP_RUNTIME_CONSTRAINTS"' in install_block
     assert "--no-build-isolation" not in resolver_block + install_block
     assert "SETUPTOOLS_USE_DISTUTILS" not in resolver_block + install_block
 
@@ -484,8 +528,8 @@ def test_runtime_dependency_install_remains_wheel_only_after_report_validation()
     runtime_install = text.index('stage "Uni-Core runtime dependencies"')
     build_diagnostic = text.index('stage "Uni-Core build prerequisite diagnostic"')
     block = text[runtime_install:build_diagnostic]
-    assert 'pip install --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"' in block
-    install_line = 'run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -r "$UNICORE_RUNTIME_REQUIREMENTS"'
+    assert 'pip install --only-binary=:all: -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" -r "$UNICORE_RUNTIME_REQUIREMENTS"' in block
+    install_line = 'run_cmd "$VENV_PYTHON" -m pip install --only-binary=:all: -c "$BOOTSTRAP_RUNTIME_CONSTRAINTS" -r "$UNICORE_RUNTIME_REQUIREMENTS"'
     assert install_line in block
     assert "--ignore-installed" not in install_line
     assert "--force-reinstall" not in install_line
@@ -506,6 +550,16 @@ def test_clean_resolution_false_replacement_fixture_is_now_retained() -> None:
     assert "Runtime dependency resolution would replace protected package numpy." in fixture
     assert "Protected package candidate matches installed distribution:" in text
     assert "{protected_decision.package_name} {protected_decision.installed_version}" in text
+
+
+def test_unconstrained_numpy_fsspec_regression_fixture_is_rejected_by_exact_validator() -> None:
+    fixture = PROTECTED_CLEAN_RESOLUTION_UNCONSTRAINED_MISMATCH.read_text(encoding="utf-8")
+    helper = RESOLVER_REPORT.read_text(encoding="utf-8")
+    assert "numpy installed=2.1.1+computecanada selected=2.2.2+computecanada" in fixture
+    assert "fsspec installed=2026.6.0+computecanada selected=2026.7.0" in fixture
+    assert "Version(installed_text)" in helper
+    assert "Version(selected_text)" in helper
+    assert "installed != selected" in helper
 
 
 def test_lmdb_native_validation_runs_before_unicore_and_requires_cpython_module() -> None:

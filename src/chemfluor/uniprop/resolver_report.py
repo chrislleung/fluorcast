@@ -8,6 +8,7 @@ from urllib.parse import unquote, urlsplit
 
 from packaging.markers import default_environment
 from packaging.requirements import Requirement
+from packaging.specifiers import SpecifierSet
 from packaging.tags import Tag, sys_tags
 from packaging.utils import (
     InvalidWheelFilename,
@@ -35,6 +36,24 @@ PROTECTED_RUNTIME_PACKAGES = {
     "wheel",
 }
 ALLIANCE_WHEELHOUSE_MARKERS = ("computecanada", "alliancecan", "wheelhouse")
+BOOTSTRAP_RUNTIME_CONSTRAINTS = {
+    "filelock": "3.32.0",
+    "fsspec": "2026.6.0",
+    "llvmlite": "0.44.0",
+    "numba": "0.61.0",
+    "numpy": "2.1.1",
+    "packaging": "26.2",
+    "setuptools": "83.0.0",
+    "torch": "2.6.0",
+    "typing-extensions": "4.16.0",
+    "wheel": "0.47.0",
+}
+FORBIDDEN_BOOTSTRAP_RUNTIME_CONSTRAINTS = {
+    "fsspec": {"2026.7.0"},
+    "llvmlite": {"0.45.0"},
+    "numba": {"0.61.2"},
+    "numpy": {"2.2.2", "2.2.6"},
+}
 
 
 @dataclass(frozen=True)
@@ -64,8 +83,82 @@ class ProtectedPackageDecision:
     action: str = "retain"
 
 
+@dataclass(frozen=True)
+class RuntimeConstraintPolicy:
+    """An exact public-version constraint used to keep pip resolution portable."""
+
+    package_name: str
+    public_version: Version
+    source_line: int
+
+
 def normalized_package_name(name: str) -> str:
     return str(canonicalize_name(name))
+
+
+def parse_bootstrap_runtime_constraints(text: str) -> dict[str, RuntimeConstraintPolicy]:
+    """Parse and validate the authoritative UniProp bootstrap runtime constraints."""
+
+    constraints: dict[str, RuntimeConstraintPolicy] = {}
+    seen_lines: dict[str, int] = {}
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        requirement = Requirement(line)
+        name = normalized_package_name(requirement.name)
+        if name not in BOOTSTRAP_RUNTIME_CONSTRAINTS:
+            raise RuntimeError(f"Unexpected bootstrap runtime constraint {requirement.name!r} on line {line_number}.")
+        if name in constraints:
+            first_line = seen_lines[name]
+            raise RuntimeError(
+                f"Duplicate bootstrap runtime constraint for {name}: lines {first_line} and {line_number}."
+            )
+        exact_versions = [
+            spec.version
+            for spec in requirement.specifier
+            if spec.operator in {"==", "==="} and "*" not in spec.version
+        ]
+        if len(exact_versions) != 1 or str(requirement.specifier) != f"=={exact_versions[0]}":
+            raise RuntimeError(
+                f"Bootstrap runtime constraint for {name} must be one exact public-version pin, got {line!r}."
+            )
+        version = Version(exact_versions[0])
+        if version.local is not None:
+            raise RuntimeError(
+                f"Bootstrap runtime constraint for {name} must omit Alliance/local suffixes, got {version}."
+            )
+        expected = Version(BOOTSTRAP_RUNTIME_CONSTRAINTS[name])
+        if version != expected:
+            raise RuntimeError(
+                f"Contradictory bootstrap runtime constraint for {name}: got {version}, expected {expected}."
+            )
+        forbidden_versions = FORBIDDEN_BOOTSTRAP_RUNTIME_CONSTRAINTS.get(name, set())
+        if version.base_version in forbidden_versions:
+            raise RuntimeError(f"Forbidden bootstrap runtime constraint for {name}: {version}.")
+        constraints[name] = RuntimeConstraintPolicy(name, version, line_number)
+        seen_lines[name] = line_number
+
+    missing = sorted(set(BOOTSTRAP_RUNTIME_CONSTRAINTS) - set(constraints))
+    if missing:
+        raise RuntimeError(f"Missing bootstrap runtime constraints: {', '.join(missing)}.")
+
+    return constraints
+
+
+def format_bootstrap_runtime_constraints(text: str) -> list[str]:
+    constraints = parse_bootstrap_runtime_constraints(text)
+    return [f"{name}=={constraints[name].public_version}" for name in sorted(constraints)]
+
+
+def public_constraint_allows_distribution(constraint: str, distribution_version: str) -> bool:
+    """Return whether a public pin accepts a distribution, including local Alliance builds."""
+
+    requirement = Requirement(constraint)
+    return SpecifierSet(str(requirement.specifier)).contains(
+        Version(distribution_version),
+        prereleases=True,
+    )
 
 
 def decoded_artifact_filename(url: str) -> str:

@@ -14,6 +14,8 @@ performance, start full training, or build the full FluorCast geometry cache.
 - Verified local Windows audit environment: `C:\Users\CL\.venvs\fluorcast-uniprop-win`
 - Uni-Core: pinned inside `third_party/nablacolors/Uni-Core`
 - Uni-Mol+: pinned inside `third_party/nablacolors/unimol_plus`
+- Authoritative bootstrap runtime constraints:
+  `configs/uniprop/bootstrap_runtime_constraints.txt`
 - First checkpoint: `uniprop_rdkit_to_dft_implicit.pt`
 - First checkpoint MD5: `c87305171142e1c0898a0e2b67a7236a`
 - Feature schema: `configs/uniprop/feature_schema.json`
@@ -55,7 +57,7 @@ from `third_party/nablacolors/unimol_plus`. It does not install Conda, create
 source packages on the login node.
 
 ```bash
-bash scripts/bootstrap_uniprop.sh --mode cuda --python python3.10 --clean
+bash scripts/bootstrap_uniprop.sh --mode cuda --python python3.10
 source .venv-uniprop/bin/activate
 ```
 
@@ -69,6 +71,33 @@ may satisfy that with a local distributor wheel such as
 allowing that local suffix. The requirement is intentionally not written with
 `+computecanada`, so standard pip version matching can select the Alliance wheel
 without making the script unusable outside that wheelhouse.
+
+The bootstrap also validates one authoritative portable constraints file before
+runtime dependency resolution:
+
+```text
+configs/uniprop/bootstrap_runtime_constraints.txt
+```
+
+It contains public version pins only:
+
+```text
+numpy==2.1.1
+torch==2.6.0
+filelock==3.32.0
+fsspec==2026.6.0
+typing-extensions==4.16.0
+packaging==26.2
+setuptools==83.0.0
+wheel==0.47.0
+numba==0.61.0
+llvmlite==0.44.0
+```
+
+Public pins such as `numpy==2.1.1` and `fsspec==2026.6.0` intentionally accept
+Alliance distributions such as `2.1.1+computecanada` and
+`2026.6.0+computecanada`. The portable constraints file must not include the
+`+computecanada` local suffix.
 
 This NumPy policy is tied to the final Uni-Mol+ import path. The pinned
 Uni-Mol+ package imports `unimol_plus.data.pcq_dataset`, which imports
@@ -95,8 +124,12 @@ module purge
 module load python/3.10
 module load gcc
 module load cuda
-bash scripts/bootstrap_uniprop.sh --mode cuda --python python3.10 --clean
+bash scripts/bootstrap_uniprop.sh --mode cuda --python python3.10
 ```
+
+Use `--clean` only when deliberately discarding a partial or invalid
+`.venv-uniprop`. Resume mode should reuse the environment so the already
+validated NumPy and CUDA-enabled PyTorch stack remains in place.
 
 Uni-Core's `setup.py` imports `torch` while pip is preparing the build, before
 the package itself is installed. PyTorch is already installed in `.venv-uniprop`,
@@ -142,6 +175,7 @@ Uni-Core, using pip's normal build-isolation behavior and binary-only selection:
 ```bash
 .venv-uniprop/bin/python -m pip install \
   --only-binary=:all: \
+  -c configs/uniprop/bootstrap_runtime_constraints.txt \
   -r configs/uniprop/unicore_runtime_requirements.txt
 ```
 
@@ -174,6 +208,7 @@ preflight:
   --ignore-installed \
   --report <temporary-runtime-report.json> \
   --only-binary=:all: \
+  -c configs/uniprop/bootstrap_runtime_constraints.txt \
   -r configs/uniprop/unicore_runtime_requirements.txt
 ```
 
@@ -183,6 +218,14 @@ validated in `.venv-uniprop`, such as NumPy, PyTorch, pip, setuptools, wheel,
 packaging, filelock, fsspec, and typing-extensions. A protected package
 appearing in the clean-resolution report does not by itself mean the real
 install will replace it.
+
+Clean resolution still needs explicit constraints. Without
+`configs/uniprop/bootstrap_runtime_constraints.txt`, pip can pick newer
+dependency candidates allowed by packages such as SciPy and Hugging Face Hub,
+for example `numpy 2.2.2+computecanada` or `fsspec 2026.7.0`, even though the
+active bootstrap environment already validated `numpy 2.1.1+computecanada` and
+`fsspec 2026.6.0+computecanada`. The clean report is useful only when it is
+constrained to the same runtime stack the bootstrap validated.
 
 The bootstrap parses the JSON report, not ordinary pip console text. It fails
 before installation if any selected artifact is not a wheel, if `wandb` is not
@@ -210,6 +253,12 @@ public-version policy, where the bootstrap still requires NumPy public/base
 version `2.1.1` and allows an Alliance local suffix. The protected-package
 audit uses `importlib.metadata.version("numpy")` as the exact distribution
 metadata source; NumPy's imported module may report only `2.1.1`.
+
+The strict exact validator must remain strict. It is the guard that fails if a
+clean report tries to replace `numpy 2.1.1+computecanada` with
+`2.2.2+computecanada`, or `fsspec 2026.6.0+computecanada` with `2026.7.0`.
+Public/base-version acceptance belongs only to the portable constraint-policy
+check.
 
 Every selected package is printed with its report name and version, original
 artifact URL, decoded artifact filename, parsed wheel name and version,
@@ -337,15 +386,15 @@ llvmlite==0.44.0
 
 Before installing those requirements, the bootstrap runs a structured pip
 dry-run report with `--dry-run`, `--ignore-installed`, `--only-binary=:all:`,
-and `--report`. It validates that selected Numba and llvmlite artifacts have
-the expected public versions, canonical package names, decoded wheel filenames,
-CPython wheel tags, Linux platform tags, and at least one tag intersecting
-`packaging.tags.sys_tags()`. Source archives, universal `py3-none-any`
-llvmlite artifacts, PyPy wheels, incompatible CPython or ABI/platform tags, and
-different public versions are rejected before installation. Diagnostics include
-the selected name and version, original URL, decoded filename, parsed wheel name
-and version, wheel tags, matching sys tag, Alliance-wheelhouse status,
-local-version status, and native-candidate status.
+`--report`, and the shared bootstrap constraint file. It validates that selected
+Numba and llvmlite artifacts have the expected public versions, canonical
+package names, decoded wheel filenames, CPython wheel tags, Linux platform tags,
+and at least one tag intersecting `packaging.tags.sys_tags()`. Source archives,
+universal `py3-none-any` llvmlite artifacts, PyPy wheels, incompatible CPython
+or ABI/platform tags, and different public versions are rejected before
+installation. Diagnostics include the selected name and version, original URL,
+decoded filename, parsed wheel name and version, wheel tags, matching sys tag,
+Alliance-wheelhouse status, local-version status, and native-candidate status.
 
 After installing Numba and llvmlite, the bootstrap audits protected packages a
 second time to confirm NumPy, PyTorch, pip, setuptools, wheel, packaging, and
@@ -355,6 +404,19 @@ distribution/runtime versions, llvmlite distribution/runtime versions, package
 paths, the Python executable, and the environment prefix, and requires all
 package paths to live inside `.venv-uniprop`. The validation requires public
 versions `numpy==2.1.1`, `numba==0.61.0`, and `llvmlite==0.44.0`.
+
+The expected constrained clean resolver selections include:
+
+```text
+numpy 2.1.1+computecanada
+fsspec 2026.6.0+computecanada
+filelock 3.32.0
+typing_extensions 4.16.0+computecanada
+packaging 26.2+computecanada
+setuptools 83.0.0+computecanada
+numba 0.61.0+computecanada
+llvmlite 0.44.0+computecanada
+```
 
 The next stage performs real Numba compilation before Uni-Mol+ is installed. It
 compiles and runs a basic `add_one` `@njit` function, then compiles and runs a
@@ -376,6 +438,11 @@ the Uni-Core `torch`-then-`setuptools` failure path, so the
 `SETUPTOOLS_USE_DISTUTILS=stdlib` setting remains Uni-Core-specific unless a
 future Nibi source-install failure proves Uni-Mol+ needs the same scoped
 compatibility mode.
+
+The Uni-Mol+ editable install also receives
+`-c configs/uniprop/bootstrap_runtime_constraints.txt`, because pip is allowed
+to inspect dependencies for that editable source install and must not upgrade
+protected packages while doing so.
 
 Expected post-bootstrap import diagnostic:
 
