@@ -12,7 +12,7 @@ from .dictionary import ConforFormerDictionary
 from .schemas import ConformerRecord, GenerationStatus, MoleculeConformerCacheRecord, MoleculeStatus
 
 
-DEFAULT_PREPROCESS_VERSION = "fluorcast-conforformer-preprocess-v1"
+DEFAULT_PREPROCESS_VERSION = "fluorcast-conforformer-preprocess-v2-runtime-mask-vocab"
 
 
 PADDING_RULE_SOURCES = {

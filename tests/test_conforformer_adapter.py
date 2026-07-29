@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import importlib
 from pathlib import Path
 import sys
@@ -50,7 +51,7 @@ def _dict(tmp_path: Path, tokens: list[str] | None = None) -> Path:
     return path
 
 
-def _checkpoint(tmp_path: Path, *, vocab_size: int = 6, embed_dim: int = 4, heads: int = 2) -> Path:
+def _checkpoint(tmp_path: Path, *, vocab_size: int = 7, embed_dim: int = 4, heads: int = 2) -> Path:
     if torch is None:
         pytest.skip("PyTorch-specific adapter test")
     path = tmp_path / "checkpoint.pt"
@@ -157,7 +158,7 @@ def test_checkpoint_metadata_parsing(tmp_path: Path) -> None:
 @requires_torch
 def test_dictionary_checkpoint_vocab_mismatch_detection(tmp_path: Path) -> None:
     dictionary = load_conforformer_dictionary(_dict(tmp_path))
-    checkpoint = inspect_checkpoint(_checkpoint(tmp_path, vocab_size=7))
+    checkpoint = inspect_checkpoint(_checkpoint(tmp_path, vocab_size=8))
     with pytest.raises(CompatibilityError, match="vocabulary size"):
         validate_dictionary_checkpoint_compatibility(dictionary, checkpoint)
 
@@ -257,6 +258,8 @@ def test_env_report_cli_does_not_require_assets(monkeypatch: pytest.MonkeyPatch)
 def test_inspect_assets_compatibility_success(tmp_path: Path) -> None:
     dictionary, checkpoint, compatibility = inspect_assets(_dict(tmp_path), _checkpoint(tmp_path))
     assert dictionary.sha256 == compatibility.dictionary_sha256
+    assert compatibility.dictionary_source_vocab_size == 6
+    assert compatibility.dictionary_vocab_size == 7
     assert checkpoint.checkpoint_sha256 == compatibility.checkpoint_sha256
     assert compatibility.compatible
 
@@ -470,3 +473,41 @@ def test_env_report_includes_upstream_import_and_shim_fields(monkeypatch: pytest
     assert report["upstream_import_status"] == {"available": True}
     assert report["applied_compatibility_shims"]["hmdb_shim_applied"] is True
     assert report["applied_compatibility_shims"]["omol_shim_applied"] is True
+
+@requires_torch
+def test_checkpoint_loader_safely_allows_argparse_namespace(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "namespace-checkpoint.pt"
+
+    torch.save(
+        {
+            "model": {
+                "embed_tokens.weight": torch.zeros(6, 4),
+                "gbf.mul.weight": torch.zeros(36, 1),
+                "gbf.means.weight": torch.zeros(1, 128),
+                "gbf_proj.linear2.weight": torch.zeros(2, 128),
+                "encoder.layers.0.self_attn.k_proj.weight": torch.zeros(
+                    4,
+                    4,
+                ),
+            },
+            "args": argparse.Namespace(
+                arch="contrast",
+                encoder_embed_dim=4,
+                encoder_attention_heads=2,
+                encoder_layers=1,
+                max_seq_len=8,
+            ),
+        },
+        path,
+    )
+
+    checkpoint = inspect_checkpoint(path)
+
+    assert checkpoint.has_model
+    assert checkpoint.has_args
+    assert checkpoint.inferred_vocab_size == 6
+    assert checkpoint.inferred_embedding_dim == 4
+    assert checkpoint.architecture.architecture_name == "contrast"
+    assert checkpoint.architecture.encoder_layers == 1

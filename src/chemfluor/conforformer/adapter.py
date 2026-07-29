@@ -7,6 +7,8 @@ inspection, model construction, or tensor inference actually needs them.
 
 from __future__ import annotations
 
+import argparse
+from contextlib import nullcontext
 from dataclasses import asdict, dataclass, field
 import hashlib
 import importlib
@@ -142,6 +144,7 @@ class CheckpointInspection:
 class CompatibilityReport:
     dictionary_path: Path
     dictionary_sha256: str
+    dictionary_source_vocab_size: int
     dictionary_vocab_size: int
     checkpoint_sha256: str
     compatible: bool
@@ -221,19 +224,41 @@ def require_torch():
 def _torch_load_checkpoint(torch: Any, checkpoint_path: Path) -> Any:
     kwargs: dict[str, Any] = {"map_location": "cpu"}
     signature = inspect.signature(torch.load)
+    load_context = nullcontext()
+
     if "weights_only" in signature.parameters:
         kwargs["weights_only"] = True
+
+        serialization = getattr(torch, "serialization", None)
+        safe_globals = getattr(serialization, "safe_globals", None)
+
+        if safe_globals is None:
+            raise CompatibilityError(
+                "The installed PyTorch version supports weights_only loading "
+                "but does not expose torch.serialization.safe_globals."
+            )
+
+        # ConforFormer.pt stores its training arguments as
+        # argparse.Namespace. Allowlist only this known metadata type while
+        # retaining the restricted weights-only unpickler.
+        load_context = safe_globals([argparse.Namespace])
+
     try:
-        return torch.load(checkpoint_path, **kwargs)
+        with load_context:
+            return torch.load(checkpoint_path, **kwargs)
     except Exception as exc:
         if kwargs.get("weights_only") is True:
             raise CompatibilityError(
-                "checkpoint could not be loaded with torch.load(..., weights_only=True). "
-                "This adapter does not fall back to arbitrary pickle execution during inspection.",
+                "checkpoint could not be loaded with "
+                "torch.load(..., weights_only=True) using the approved "
+                "ConforFormer metadata allowlist. This adapter does not "
+                "fall back to arbitrary pickle execution.",
                 detail=str(exc),
             ) from exc
+
         raise CompatibilityError(
-            "checkpoint could not be loaded safely with the installed PyTorch version",
+            "checkpoint could not be loaded safely with the installed "
+            "PyTorch version",
             detail=str(exc),
         ) from exc
 
@@ -365,6 +390,14 @@ def validate_dictionary_checkpoint_compatibility(
     errors: list[str] = []
     warnings: list[str] = list(checkpoint.warnings)
     arch = checkpoint.architecture.with_defaults()
+
+    if dictionary.source_vocab_size != dictionary.vocab_size:
+        warnings.append(
+            "runtime dictionary adds [MASK] as required by "
+            "unimol_contrast: "
+            f"source_vocab_size={dictionary.source_vocab_size}, "
+            f"runtime_vocab_size={dictionary.vocab_size}"
+        )
     if checkpoint.inferred_vocab_size is not None and checkpoint.inferred_vocab_size != dictionary.vocab_size:
         errors.append(
             f"dictionary vocabulary size {dictionary.vocab_size} does not match checkpoint token embedding "
@@ -394,6 +427,7 @@ def validate_dictionary_checkpoint_compatibility(
     return CompatibilityReport(
         dictionary_path=dictionary.path,
         dictionary_sha256=dictionary.sha256,
+        dictionary_source_vocab_size=dictionary.source_vocab_size,
         dictionary_vocab_size=dictionary.vocab_size,
         checkpoint_sha256=checkpoint.checkpoint_sha256,
         compatible=True,
