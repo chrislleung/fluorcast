@@ -115,3 +115,6 @@ outputs/candidate_screening/
 paper_comparison_full_20260625_0920.tar.gz
 hybrid predictions/
 final_hybrid_stokes_results.tar.gz
+
+# Local ConforFormer smoke-test cache
+data/processed/conforformer_smoke_cache/
