@@ -223,15 +223,28 @@ def main(argv: list[str] | None = None) -> int:
     except AdapterError as exc:
         report.update(
             {
+                "status": "failed",
                 "failure_category": exc.reason_code,
                 "failure_reason": str(exc),
                 "failure_detail": exc.detail,
             }
         )
     except PreprocessingError as exc:
-        report.update({"failure_category": "preprocessing_failure", "failure_reason": str(exc)})
+        report.update(
+            {
+                "status": "failed",
+                "failure_category": "preprocessing_failure",
+                "failure_reason": str(exc),
+            }
+        )
     except Exception as exc:
-        report.update({"failure_category": type(exc).__name__, "failure_reason": str(exc)})
+        report.update(
+            {
+                "status": "failed",
+                "failure_category": type(exc).__name__,
+                "failure_reason": str(exc),
+            }
+        )
     _print_report(report, args.output)
     return 1
 

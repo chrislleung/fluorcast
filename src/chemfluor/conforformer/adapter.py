@@ -702,6 +702,118 @@ def _model_args(architecture: ArchitectureMetadata, dictionary_path: Path) -> Si
         x_norm_loss=-1.0,
     )
 
+def _checkpoint_args_payload(state: Any) -> dict[str, Any]:
+    """Return a mutable copy of checkpoint training arguments."""
+
+    if not isinstance(state, dict):
+        return {}
+
+    source = state.get("args")
+
+    if isinstance(source, dict):
+        return dict(source)
+
+    if source is not None and hasattr(source, "__dict__"):
+        return dict(vars(source))
+
+    return {}
+
+
+def _state_dict_has_prefix(
+    state_dict: dict[str, Any],
+    prefix: str,
+) -> bool:
+    return any(key.startswith(prefix) for key in state_dict)
+
+
+def _is_positive_loss(value: Any) -> bool:
+    try:
+        return float(value) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _is_nonnegative_loss(value: Any) -> bool:
+    try:
+        return float(value) >= 0
+    except (TypeError, ValueError):
+        return False
+
+
+def _model_args_from_checkpoint(
+    state: Any,
+    state_dict: dict[str, Any],
+    architecture: ArchitectureMetadata,
+    dictionary_path: Path,
+) -> SimpleNamespace:
+    """Reconstruct the checkpoint's exact model module graph.
+
+    ConforFormer conditionally creates its masked-token, coordinate,
+    distance, and final pair-normalization modules from loss arguments.
+    The checkpoint state dictionary is treated as authoritative about
+    whether each conditional module must exist.
+    """
+
+    payload = vars(
+        _model_args(
+            architecture,
+            dictionary_path,
+        )
+    ).copy()
+
+    # Restore training-time architectural settings such as dropout,
+    # normalization, and conditional pretraining-head flags.
+    payload.update(_checkpoint_args_payload(state))
+
+    arch = architecture.with_defaults()
+
+    # Force values controlled by inspected checkpoint dimensions or by
+    # FluorCast's direct inference pathway.
+    payload.update(
+        {
+            "arch": "contrast",
+            "model_name": "contrast",
+            "task": "unimol_contrast",
+            "mode": "infer",
+            "data": str(dictionary_path.parent),
+            "dict_name": dictionary_path.name,
+            "only_polar": 0,
+            "encoder_layers": arch.encoder_layers,
+            "encoder_embed_dim": arch.encoder_embed_dim,
+            "encoder_ffn_embed_dim": arch.encoder_ffn_embed_dim,
+            "encoder_attention_heads": arch.encoder_attention_heads,
+            "max_seq_len": arch.max_seq_len,
+        }
+    )
+
+    # Reproduce the precise conditional module graph represented in the
+    # checkpoint. This prevents both unexpected and missing state keys.
+    conditional_heads = (
+        ("masked_token_loss", "lm_head."),
+        ("masked_coord_loss", "pair2coord_proj."),
+        ("masked_dist_loss", "dist_head."),
+    )
+
+    for argument_name, state_prefix in conditional_heads:
+        if _state_dict_has_prefix(state_dict, state_prefix):
+            if not _is_positive_loss(payload.get(argument_name)):
+                payload[argument_name] = 1.0
+        else:
+            payload[argument_name] = -1.0
+
+    if _state_dict_has_prefix(
+        state_dict,
+        "encoder.final_head_layer_norm.",
+    ):
+        if not _is_nonnegative_loss(
+            payload.get("delta_pair_repr_norm_loss")
+        ):
+            payload["delta_pair_repr_norm_loss"] = 1.0
+    else:
+        payload["delta_pair_repr_norm_loss"] = -1.0
+
+    return SimpleNamespace(**payload)
+
 
 @dataclass
 class ConforFormerEncoderAdapter:
@@ -736,14 +848,37 @@ class ConforFormerEncoderAdapter:
 
         from unicore import models
 
-        args = _model_args(self.compatibility.architecture, self.dictionary_path)
-        task = SimpleNamespace(dictionary=_DictionaryShim(self.dictionary))
-        model = models.build_model(args, task)
-        state = _torch_load_checkpoint(torch, self.checkpoint_path)
-        state_dict_key, state_dict = _state_dict_from_checkpoint(state)
+        # Load checkpoint metadata and tensors before constructing the model.
+        # Its state dictionary determines which conditional pretraining heads
+        # must exist for strict checkpoint loading.
+        state = _torch_load_checkpoint(
+            torch,
+            self.checkpoint_path,
+        )
+        state_dict_key, state_dict = _state_dict_from_checkpoint(
+            state
+        )
+
         if state_dict is None or state_dict_key != "model":
-            raise CompatibilityError("upstream loading requires checkpoint state['model']")
-        load_result = model.load_state_dict(state_dict, strict=not self.allow_nonstrict)
+            raise CompatibilityError(
+                "upstream loading requires checkpoint state['model']"
+            )
+
+        args = _model_args_from_checkpoint(
+            state,
+            state_dict,
+            self.compatibility.architecture,
+            self.dictionary_path,
+        )
+        task = SimpleNamespace(
+            dictionary=_DictionaryShim(self.dictionary)
+        )
+        model = models.build_model(args, task)
+
+        load_result = model.load_state_dict(
+            state_dict,
+            strict=not self.allow_nonstrict,
+        )
         self.load_missing_keys = tuple(getattr(load_result, "missing_keys", ()))
         self.load_unexpected_keys = tuple(getattr(load_result, "unexpected_keys", ()))
         if (self.load_missing_keys or self.load_unexpected_keys) and not self.allow_nonstrict:

@@ -511,3 +511,117 @@ def test_checkpoint_loader_safely_allows_argparse_namespace(
     assert checkpoint.inferred_embedding_dim == 4
     assert checkpoint.architecture.architecture_name == "contrast"
     assert checkpoint.architecture.encoder_layers == 1
+
+
+def test_model_args_restore_checkpoint_pretraining_head_flags(
+    tmp_path: Path,
+) -> None:
+    from chemfluor.conforformer import adapter as adapter_module
+
+    state = {
+        "args": argparse.Namespace(
+            arch="unimol_contrast",
+            model_name="contrast",
+            mode="train",
+            masked_token_loss=1.0,
+            masked_coord_loss=5.0,
+            masked_dist_loss=10.0,
+            delta_pair_repr_norm_loss=0.01,
+            attention_dropout=0.2,
+        )
+    }
+    state_dict = {
+        "lm_head.weight": object(),
+        "pair2coord_proj.linear1.weight": object(),
+        "dist_head.dense.weight": object(),
+        "encoder.final_head_layer_norm.weight": object(),
+    }
+
+    architecture = adapter_module.ArchitectureMetadata(
+        architecture_name="unimol_contrast",
+        model_name="contrast",
+        encoder_layers=15,
+        encoder_embed_dim=512,
+        encoder_ffn_embed_dim=2048,
+        encoder_attention_heads=64,
+        max_seq_len=512,
+    )
+
+    args = adapter_module._model_args_from_checkpoint(
+        state,
+        state_dict,
+        architecture,
+        tmp_path / "OMOL_full_dict.txt",
+    )
+
+    assert args.masked_token_loss == 1.0
+    assert args.masked_coord_loss == 5.0
+    assert args.masked_dist_loss == 10.0
+    assert args.delta_pair_repr_norm_loss == 0.01
+    assert args.attention_dropout == 0.2
+
+    assert args.arch == "contrast"
+    assert args.model_name == "contrast"
+    assert args.task == "unimol_contrast"
+    assert args.mode == "infer"
+    assert args.only_polar == 0
+
+
+def test_model_args_infer_head_flags_from_state_dict(
+    tmp_path: Path,
+) -> None:
+    from chemfluor.conforformer import adapter as adapter_module
+
+    state = {
+        "args": argparse.Namespace(
+            masked_token_loss=-1.0,
+            masked_coord_loss=-1.0,
+            masked_dist_loss=-1.0,
+            delta_pair_repr_norm_loss=-1.0,
+        )
+    }
+    state_dict = {
+        "lm_head.weight": object(),
+        "pair2coord_proj.linear1.weight": object(),
+        "dist_head.dense.weight": object(),
+        "encoder.final_head_layer_norm.weight": object(),
+    }
+
+    args = adapter_module._model_args_from_checkpoint(
+        state,
+        state_dict,
+        adapter_module.ArchitectureMetadata(),
+        tmp_path / "OMOL_full_dict.txt",
+    )
+
+    assert args.masked_token_loss > 0
+    assert args.masked_coord_loss > 0
+    assert args.masked_dist_loss > 0
+    assert args.delta_pair_repr_norm_loss >= 0
+
+
+def test_model_args_disable_heads_absent_from_state_dict(
+    tmp_path: Path,
+) -> None:
+    from chemfluor.conforformer import adapter as adapter_module
+
+    state = {
+        "args": argparse.Namespace(
+            masked_token_loss=1.0,
+            masked_coord_loss=1.0,
+            masked_dist_loss=1.0,
+            delta_pair_repr_norm_loss=1.0,
+        )
+    }
+
+    args = adapter_module._model_args_from_checkpoint(
+        state,
+        {},
+        adapter_module.ArchitectureMetadata(),
+        tmp_path / "OMOL_full_dict.txt",
+    )
+
+    assert args.masked_token_loss < 0
+    assert args.masked_coord_loss < 0
+    assert args.masked_dist_loss < 0
+    assert args.delta_pair_repr_norm_loss < 0
