@@ -47,6 +47,41 @@ def _fake_embeddings(ids: list[str]) -> np.ndarray:
     return np.vstack(rows)
 
 
+def _read_upstream_commit() -> str:
+    return (PROJECT_ROOT / "configs" / "conforformer" / "upstream_commit.txt").read_text(encoding="utf-8").strip()
+
+
+def build_embedding_identity_and_dictionary(
+    *,
+    inventory_manifest: dict,
+    checkpoint_path: Path,
+    dictionary_path: Path,
+    fake_adapter: bool,
+    preprocess_config: ConforFormerPreprocessingConfig,
+    conformer_config: ConformerGenerationConfig,
+) -> tuple[dict, object]:
+    if fake_adapter:
+        dictionary = load_conforformer_dictionary(dictionary_path)
+        checkpoint_sha256 = sha256_file(checkpoint_path)
+        dictionary_sha256 = dictionary.sha256
+        architecture_payload = {"encoder_embed_dim": 512, "source": "fake_adapter"}
+    else:
+        dictionary, checkpoint, compatibility = inspect_assets(dictionary_path, checkpoint_path)
+        checkpoint_sha256 = checkpoint.checkpoint_sha256
+        dictionary_sha256 = dictionary.sha256
+        architecture_payload = compatibility.architecture.with_defaults().__dict__
+    identity = expected_identity(
+        inventory_manifest=inventory_manifest,
+        checkpoint_sha256=checkpoint_sha256,
+        dictionary_sha256=dictionary_sha256,
+        upstream_commit=_read_upstream_commit(),
+        architecture_payload=architecture_payload,
+        preprocessing_payload=preprocess_config.to_payload(),
+        conformer_config_payload=conformer_config.to_payload(),
+    )
+    return identity, dictionary
+
+
 def main() -> int:
     args = parse_args()
     inventory, inventory_manifest = load_inventory(args.run_root)
@@ -57,33 +92,22 @@ def main() -> int:
     conformer_config = ConformerGenerationConfig()
     preprocess_config = ConforFormerPreprocessingConfig()
 
-    if args.fake_adapter:
-        dictionary = load_conforformer_dictionary(args.dictionary)
-        identity = expected_identity(
-            inventory_manifest=inventory_manifest,
-            checkpoint_sha256=sha256_file(args.checkpoint),
-            dictionary_sha256=dictionary.sha256,
-            upstream_commit=(PROJECT_ROOT / "configs" / "conforformer" / "upstream_commit.txt").read_text(encoding="utf-8").strip(),
-            architecture_payload={"encoder_embed_dim": 512, "source": "fake_adapter"},
-            preprocessing_payload=preprocess_config.to_payload(),
-            conformer_config_payload=conformer_config.to_payload(),
-        )
-        adapter = None
-    else:
-        dictionary, checkpoint, compatibility = inspect_assets(args.dictionary, args.checkpoint)
-        adapter = ConforFormerEncoderAdapter(dictionary_path=args.dictionary, checkpoint_path=args.checkpoint, device=args.device, root=PROJECT_ROOT)
-        identity = expected_identity(
-            inventory_manifest=inventory_manifest,
-            checkpoint_sha256=checkpoint.checkpoint_sha256,
-            dictionary_sha256=dictionary.sha256,
-            upstream_commit=adapter.upstream_commit,
-            architecture_payload=compatibility.architecture.with_defaults().__dict__,
-            preprocessing_payload=preprocess_config.to_payload(),
-            conformer_config_payload=conformer_config.to_payload(),
-        )
+    identity, dictionary = build_embedding_identity_and_dictionary(
+        inventory_manifest=inventory_manifest,
+        checkpoint_path=args.checkpoint,
+        dictionary_path=args.dictionary,
+        fake_adapter=args.fake_adapter,
+        preprocess_config=preprocess_config,
+        conformer_config=conformer_config,
+    )
     if shard_is_complete(args.run_root, args.shard_index, expected_molecule_count=len(shard_rows), identity=identity):
         print(f"shard {args.shard_index} already complete")
         return 0
+    adapter = (
+        None
+        if args.fake_adapter
+        else ConforFormerEncoderAdapter(dictionary_path=args.dictionary, checkpoint_path=args.checkpoint, device=args.device, root=PROJECT_ROOT)
+    )
 
     conformer_ids_by_molecule: list[list[str]] = []
     embeddings_by_molecule: list[np.ndarray | None] = []
@@ -152,4 +176,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

@@ -9,6 +9,7 @@ import pytest
 from rdkit import rdBase
 
 import scripts.build_conformer_cache as build_conformer_cache
+import scripts.build_conformer_cache_shard as build_conformer_cache_shard
 from chemfluor.conforformer.cache import (
     CONFORMER_CACHE_SCHEMA_VERSION,
     CacheError,
@@ -206,6 +207,50 @@ def test_cli_dry_run_does_not_generate_conformers(tmp_path: Path, monkeypatch: p
     )
     assert exit_code == 0
     assert not list(tmp_path.glob("*.json"))
+
+
+def test_shard_helper_loads_valid_cache_before_generation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = ConformerGenerationConfig(num_conformers=1, retry_conformer_counts=())
+    record = generate_conformer_cache_record("CCO", chromophore_id="ethanol", config=config)
+    save_conformer_cache_record(record, tmp_path)
+
+    def fail_generate(*args: object, **kwargs: object) -> object:
+        raise AssertionError("valid resume must not generate conformers")
+
+    monkeypatch.setattr(build_conformer_cache_shard, "generate_conformer_cache_record", fail_generate)
+    loaded, path, cache_hit = build_conformer_cache_shard.load_or_generate_cache_record(
+        smiles="OCC",
+        chromophore_id="ethanol",
+        cache_dir=tmp_path,
+        config=config,
+    )
+    assert loaded.to_payload() == record.to_payload()
+    assert path.name == f"{record.conformer_cache_key}.json"
+    assert cache_hit is True
+
+
+def test_shard_helper_regenerates_corrupt_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = ConformerGenerationConfig(num_conformers=1, retry_conformer_counts=())
+    record = generate_conformer_cache_record("CCO", chromophore_id="ethanol", config=config)
+    path = save_conformer_cache_record(record, tmp_path)
+    path.write_text("corrupt", encoding="utf-8")
+    calls = {"count": 0}
+
+    def generate(*args: object, **kwargs: object) -> object:
+        calls["count"] += 1
+        return record
+
+    monkeypatch.setattr(build_conformer_cache_shard, "generate_conformer_cache_record", generate)
+    loaded, _path, cache_hit = build_conformer_cache_shard.load_or_generate_cache_record(
+        smiles="CCO",
+        chromophore_id="ethanol",
+        cache_dir=tmp_path,
+        config=config,
+    )
+    assert loaded.to_payload() == record.to_payload()
+    assert cache_hit is False
+    assert calls["count"] == 1
+    assert load_conformer_cache_record(path, expected_cache_key=record.conformer_cache_key).to_payload() == record.to_payload()
 
 
 def test_cli_csv_dry_run_deduplicates_and_counts_invalid(tmp_path: Path) -> None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -62,6 +62,7 @@ class FeatureBundle:
     rows: pd.DataFrame
     embeddings_by_pooling: dict[str, np.ndarray]
     morgan: np.ndarray
+    morgan_valid: np.ndarray
     solvent_values: pd.DataFrame
     solvent_columns: list[str]
 
@@ -108,16 +109,16 @@ def merge_solvent_descriptors(rows: pd.DataFrame, descriptors: pd.DataFrame) -> 
         "descriptor_solvent_key", keep="first"
     )[["descriptor_solvent_key", *descriptor_columns]]
     merged = rows.copy()
-    merged["row_id"] = np.arange(len(merged))
+    merged["_descriptor_merge_row"] = np.arange(len(merged))
     merged["descriptor_canonical_key"] = merged["canonical_solvent_smiles"].astype("string")
     merged["descriptor_solvent_key"] = merged.get("solvent_original", pd.Series(pd.NA, index=merged.index)).astype("string").str.lower()
     merged = merged.merge(canonical, how="left", on="descriptor_canonical_key")
     unmatched = merged[descriptor_columns].isna().all(axis=1) if descriptor_columns else pd.Series(False, index=merged.index)
     if unmatched.any():
-        fallback = merged.loc[unmatched, ["row_id", "descriptor_solvent_key"]].merge(labels, how="left", on="descriptor_solvent_key").set_index("row_id")
+        fallback = merged.loc[unmatched, ["_descriptor_merge_row", "descriptor_solvent_key"]].merge(labels, how="left", on="descriptor_solvent_key").set_index("_descriptor_merge_row")
         for column in descriptor_columns:
-            merged.loc[unmatched, column] = merged.loc[unmatched, "row_id"].map(fallback[column])
-    return merged.drop(columns=["row_id", "descriptor_canonical_key", "descriptor_solvent_key"]), descriptor_columns
+            merged.loc[unmatched, column] = merged.loc[unmatched, "_descriptor_merge_row"].map(fallback[column])
+    return merged.drop(columns=["_descriptor_merge_row", "descriptor_canonical_key", "descriptor_solvent_key"]), descriptor_columns
 
 
 def morgan_fingerprint(smiles: str, *, radius: int = 2, n_bits: int = 2048) -> np.ndarray | None:
@@ -237,7 +238,7 @@ def build_feature_bundle(
     n_bits: int = 2048,
     radius: int = 2,
     include_missing_indicators: bool = True,
-) -> tuple[FeatureBundle, pd.DataFrame]:
+) -> tuple[FeatureBundle, pd.DataFrame, pd.DataFrame]:
     dataset = pd.read_csv(dataset_csv, low_memory=False)
     dataset = dataset.dropna(subset=["canonical_chromophore_smiles"]).reset_index(drop=True)
     embeddings = load_finalized_embeddings(embedding_run_root)
@@ -251,16 +252,23 @@ def build_feature_bundle(
         solvent_values = pd.concat([solvent_values, indicators], axis=1)
         solvent_columns = list(solvent_values.columns)
     fingerprints: list[np.ndarray] = []
-    valid_idx: list[int] = []
+    morgan_valid: list[bool] = []
+    morgan_exclusions: list[dict[str, Any]] = []
     for idx, smiles in rows["canonical_chromophore_smiles"].items():
         fp = morgan_fingerprint(str(smiles), radius=radius, n_bits=n_bits)
         if fp is not None:
             fingerprints.append(fp)
-            valid_idx.append(idx)
-    if not fingerprints:
-        raise ValueError("no Morgan fingerprints could be generated")
-    rows = rows.loc[valid_idx].reset_index(drop=True)
-    solvent_values = solvent_values.loc[valid_idx].reset_index(drop=True)
+            morgan_valid.append(True)
+        else:
+            fingerprints.append(np.zeros((n_bits,), dtype=np.float32))
+            morgan_valid.append(False)
+            morgan_exclusions.append(
+                {
+                    "row_id": rows.loc[idx, "row_id"],
+                    "canonical_chromophore_smiles": rows.loc[idx, "canonical_chromophore_smiles"],
+                    "exclusion_reason": "morgan_fingerprint_failed",
+                }
+            )
     embeddings_by_pooling = {
         method: np.vstack(rows[method].to_list()).astype(np.float32)
         for method in POOLING_METHODS
@@ -270,10 +278,12 @@ def build_feature_bundle(
             rows=rows,
             embeddings_by_pooling=embeddings_by_pooling,
             morgan=np.vstack(fingerprints).astype(np.float32),
+            morgan_valid=np.asarray(morgan_valid, dtype=bool),
             solvent_values=solvent_values,
             solvent_columns=solvent_columns,
         ),
         excluded,
+        pd.DataFrame(morgan_exclusions),
     )
 
 
@@ -324,6 +334,20 @@ def _feature_matrix(bundle: FeatureBundle, *, pooling: str, feature_set: str) ->
     return np.hstack(parts).astype(np.float32)
 
 
+def _feature_set_mask(bundle: FeatureBundle, feature_set: str) -> np.ndarray:
+    if feature_set == "conforformer_solvent":
+        return np.ones(len(bundle.rows), dtype=bool)
+    if feature_set in {"morgan_solvent", "conforformer_morgan_solvent"}:
+        return bundle.morgan_valid.copy()
+    raise ValueError(f"unknown feature set: {feature_set}")
+
+
+def _poolings_for_feature_set(pooling_methods: list[str], feature_set: str) -> list[str]:
+    if feature_set == "morgan_solvent":
+        return ["not_applicable"]
+    return pooling_methods
+
+
 def feature_names(*, pooling: str, feature_set: str, solvent_columns: list[str], n_bits: int) -> list[str]:
     names: list[str] = []
     if feature_set in {"conforformer_solvent", "conforformer_morgan_solvent"}:
@@ -368,7 +392,7 @@ def train_downstream(
     (out_dir / "reports").mkdir(parents=True, exist_ok=True)
     feature_sets = feature_sets or ["conforformer_solvent", "morgan_solvent"]
     pooling_methods = pooling_methods or POOLING_METHODS
-    bundle, excluded = build_feature_bundle(
+    bundle, excluded, morgan_excluded = build_feature_bundle(
         dataset_csv=dataset_csv,
         embedding_run_root=embedding_run_root,
         solvent_descriptors=solvent_descriptors,
@@ -376,9 +400,13 @@ def train_downstream(
         radius=radius,
     )
     split_assignments, leakage = make_split_assignments(bundle.rows, split_type=split_type, seed=seed)
-    bundle.rows = bundle.rows.merge(split_assignments[["row_id", "split"]], how="left", on="row_id", validate="one_to_one")
+    bundle = replace(
+        bundle,
+        rows=bundle.rows.merge(split_assignments[["row_id", "split"]], how="left", on="row_id", validate="one_to_one"),
+    )
     split_assignments.to_csv(out_dir / "split_assignments.csv", index=False)
     excluded.to_csv(out_dir / "excluded_rows.csv", index=False)
+    morgan_excluded.to_csv(out_dir / "morgan_excluded_rows.csv", index=False)
     atomic_write_text(out_dir / "leakage_check.json", json.dumps(leakage, indent=2, sort_keys=True) + "\n")
 
     selection_rows: list[dict[str, Any]] = []
@@ -386,12 +414,27 @@ def train_downstream(
     selected: dict[str, Any] = {}
     predictions_by_key: dict[tuple[str, str, str], pd.DataFrame] = {}
 
-    for pooling in pooling_methods:
-        for feature_set in feature_sets:
+    cohort_counts: dict[str, Any] = {}
+    target_counts: dict[str, Any] = {}
+
+    for feature_set in feature_sets:
+        feature_mask = _feature_set_mask(bundle, feature_set)
+        cohort_rows = bundle.rows.loc[feature_mask]
+        cohort_counts[feature_set] = {
+            "primary_conforformer_row_count": int(len(bundle.rows)),
+            "feature_set_row_count": int(feature_mask.sum()),
+            "morgan_excluded_row_count": int((~bundle.morgan_valid).sum()) if feature_set in {"morgan_solvent", "conforformer_morgan_solvent"} else 0,
+            "comparison_cohort": "matched_intersection" if feature_set in {"morgan_solvent", "conforformer_morgan_solvent"} else "full_primary",
+        }
+        for pooling in _poolings_for_feature_set(pooling_methods, feature_set):
             full_x = _feature_matrix(bundle, pooling=pooling, feature_set=feature_set)
             names = feature_names(pooling=pooling, feature_set=feature_set, solvent_columns=bundle.solvent_columns, n_bits=n_bits)
             for target in TARGETS:
-                target_rows, target_info = _target_rows(bundle.rows, target)
+                target_rows, target_info = _target_rows(cohort_rows, target)
+                target_counts[f"{target}/{pooling}/{feature_set}"] = {
+                    "before_target_missingness": int(len(cohort_rows)),
+                    "after_target_missingness": int(len(target_rows)),
+                }
                 if len(target_rows) < 6:
                     continue
                 idx = target_rows.index.to_numpy()
@@ -416,6 +459,7 @@ def train_downstream(
                             "target": target,
                             "pooling_method": pooling,
                             "feature_set": feature_set,
+                            "comparison_cohort": cohort_counts[feature_set]["comparison_cohort"],
                             "candidate": name,
                             "validation_mae": mae,
                             **target_info,
@@ -443,6 +487,7 @@ def train_downstream(
                     "target": target,
                     "pooling_method": pooling,
                     "feature_set": feature_set,
+                    "comparison_cohort": cohort_counts[feature_set]["comparison_cohort"],
                     "model": best_name,
                     "split": "final_test",
                     **metrics(pred_df["y_true"].to_numpy(dtype=float), pred_df["y_pred"].to_numpy(dtype=float)),
@@ -475,6 +520,7 @@ def train_downstream(
                     "target": target,
                     "pooling_method": pooling,
                     "feature_set": feature_set,
+                    "comparison_cohort": cohort_counts[feature_set]["comparison_cohort"],
                 }
                 atomic_write_text(model_dir / "feature_metadata.json", json.dumps(metadata, indent=2, sort_keys=True) + "\n")
                 atomic_write_text(model_dir / "metrics.json", json.dumps(row_metrics, indent=2, sort_keys=True) + "\n")
@@ -500,6 +546,13 @@ def train_downstream(
         },
         "feature_sets": feature_sets,
         "pooling_methods": pooling_methods,
+        "effective_pooling_methods_by_feature_set": {
+            feature_set: _poolings_for_feature_set(pooling_methods, feature_set)
+            for feature_set in feature_sets
+        },
+        "feature_set_row_counts": cohort_counts,
+        "target_row_counts": target_counts,
+        "morgan_exclusion_report": str(out_dir / "morgan_excluded_rows.csv"),
         "solvent_feature_names": bundle.solvent_columns,
         "imputation": "SimpleImputer(strategy='median') fit only on the training rows used for the fit",
         "candidate_definitions": list(make_candidates(seed=seed, n_jobs=n_jobs).keys()),
@@ -513,36 +566,37 @@ def train_downstream(
 
 def _derived_stokes_metrics(predictions: dict[tuple[str, str, str], pd.DataFrame]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
-    for pooling in POOLING_METHODS:
-        for feature_set in FEATURE_SETS:
-            a = predictions.get(("absorption_nm", pooling, feature_set))
-            e = predictions.get(("emission_nm", pooling, feature_set))
-            d = predictions.get(("stokes_shift_nm", pooling, feature_set))
-            if a is None or e is None or d is None:
-                continue
-            paired = d[["row_id", "y_true"]].merge(
-                a[["row_id", "y_pred"]].rename(columns={"y_pred": "absorption_pred"}),
-                on="row_id",
-                how="inner",
-            ).merge(
-                e[["row_id", "y_pred"]].rename(columns={"y_pred": "emission_pred"}),
-                on="row_id",
-                how="inner",
-            )
-            if paired.empty:
-                continue
-            derived = paired["emission_pred"].to_numpy(dtype=float) - paired["absorption_pred"].to_numpy(dtype=float)
-            row = {
-                "target": "stokes_shift_nm",
-                "pooling_method": pooling,
-                "feature_set": feature_set,
-                "model": "absorption_emission_derived",
-                "split": "final_test_identical_rows",
-                **metrics(paired["y_true"].to_numpy(dtype=float), derived),
-                "physically_invalid_derived_prediction_fraction": float(np.mean(derived <= 0)),
-                "identical_row_count": int(len(paired)),
-            }
-            rows.append(row)
+    keys = {(pooling, feature_set) for target, pooling, feature_set in predictions if target in {"absorption_nm", "emission_nm", "stokes_shift_nm"}}
+    for pooling, feature_set in sorted(keys):
+        a = predictions.get(("absorption_nm", pooling, feature_set))
+        e = predictions.get(("emission_nm", pooling, feature_set))
+        d = predictions.get(("stokes_shift_nm", pooling, feature_set))
+        if a is None or e is None or d is None:
+            continue
+        paired = d[["row_id", "y_true"]].merge(
+            a[["row_id", "y_pred"]].rename(columns={"y_pred": "absorption_pred"}),
+            on="row_id",
+            how="inner",
+        ).merge(
+            e[["row_id", "y_pred"]].rename(columns={"y_pred": "emission_pred"}),
+            on="row_id",
+            how="inner",
+        )
+        if paired.empty:
+            continue
+        derived = paired["emission_pred"].to_numpy(dtype=float) - paired["absorption_pred"].to_numpy(dtype=float)
+        row = {
+            "target": "stokes_shift_nm",
+            "pooling_method": pooling,
+            "feature_set": feature_set,
+            "model": "absorption_emission_derived",
+            "split": "final_test_identical_rows",
+            **metrics(paired["y_true"].to_numpy(dtype=float), derived),
+            "physically_invalid_derived_prediction_fraction": float(np.mean(derived <= 0)),
+            "identical_row_count": int(len(paired)),
+            "comparison_cohort": "matched_intersection" if feature_set in {"morgan_solvent", "conforformer_morgan_solvent"} else "full_primary",
+        }
+        rows.append(row)
     return rows
 
 
@@ -555,4 +609,3 @@ def _package_versions() -> dict[str, str]:
         except Exception:
             versions[module_name] = "unavailable"
     return versions
-

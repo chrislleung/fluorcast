@@ -12,9 +12,9 @@ SRC_PATH = PROJECT_ROOT / "src"
 if str(SRC_PATH) not in sys.path:
     sys.path.insert(0, str(SRC_PATH))
 
-from chemfluor.conforformer.cache import CacheError, conformer_cache_path, load_conformer_cache_record, save_conformer_cache_record  # noqa: E402
+from chemfluor.conforformer.cache import CacheError, build_conformer_cache_key, conformer_cache_path, load_conformer_cache_record, save_conformer_cache_record  # noqa: E402
 from chemfluor.conforformer.config import ConformerGenerationConfig  # noqa: E402
-from chemfluor.conforformer.conformers import generate_conformer_cache_record  # noqa: E402
+from chemfluor.conforformer.conformers import canonicalize_smiles, generate_conformer_cache_record  # noqa: E402
 from chemfluor.conforformer.embedding_store import status_path  # noqa: E402
 from chemfluor.conforformer.inventory import atomic_write_text, load_inventory, sha256_payload  # noqa: E402
 from chemfluor.conforformer.schemas import MoleculeStatus  # noqa: E402
@@ -30,6 +30,31 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def load_or_generate_cache_record(
+    *,
+    smiles: str,
+    chromophore_id: str,
+    cache_dir: Path,
+    config: ConformerGenerationConfig,
+) -> tuple[object, Path, bool]:
+    canonical, isomeric = canonicalize_smiles(smiles)
+    cache_key = build_conformer_cache_key(
+        canonical_smiles=canonical,
+        isomeric_canonical_smiles=isomeric,
+        config=config,
+    )
+    path = conformer_cache_path(cache_dir, cache_key)
+    if path.exists():
+        try:
+            return load_conformer_cache_record(path, expected_cache_key=cache_key), path, True
+        except CacheError:
+            pass
+
+    record = generate_conformer_cache_record(smiles, chromophore_id=chromophore_id, config=config)
+    save_conformer_cache_record(record, cache_dir, overwrite=path.exists())
+    return record, conformer_cache_path(cache_dir, record.conformer_cache_key), False
+
+
 def main() -> int:
     args = parse_args()
     inventory, _manifest = load_inventory(args.run_root)
@@ -41,17 +66,12 @@ def main() -> int:
     records: list[dict[str, object]] = []
     for row in shard_rows.itertuples(index=False):
         smiles = str(row.canonical_chromophore_smiles)
-        record = generate_conformer_cache_record(smiles, chromophore_id=str(row.molecule_id), config=config)
-        path = conformer_cache_path(cache_dir, record.conformer_cache_key)
-        cache_hit = False
-        if path.exists():
-            try:
-                load_conformer_cache_record(path, expected_cache_key=record.conformer_cache_key)
-                cache_hit = True
-            except CacheError:
-                save_conformer_cache_record(record, cache_dir, overwrite=True)
-        else:
-            save_conformer_cache_record(record, cache_dir)
+        record, path, cache_hit = load_or_generate_cache_record(
+            smiles=smiles,
+            chromophore_id=str(row.molecule_id),
+            cache_dir=cache_dir,
+            config=config,
+        )
         records.append(
             {
                 "molecule_id": row.molecule_id,
@@ -76,4 +96,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

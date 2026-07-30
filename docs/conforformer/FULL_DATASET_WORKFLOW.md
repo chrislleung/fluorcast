@@ -14,11 +14,13 @@ The pipeline has four resumable stages:
    partitions molecules into deterministic shards.
 2. Conformer cache: `scripts/build_conformer_cache_shard.py` processes one CPU
    array shard and reuses `chemfluor.conforformer.conformers` plus the hashed
-   JSON conformer cache.
+   JSON conformer cache. It canonicalizes each input, computes the deterministic
+   cache key, and validates an existing cache file before generating conformers.
 3. Embedding shards: `scripts/embed_conforformer_shard.py` loads the
-   ConforFormer model once per GPU shard, batches conformers, stores all
-   conformer-level 512-dimensional embeddings in compressed NPZ files, and
-   writes a separate hash-validated done manifest.
+   ConforFormer model only after lightweight asset metadata proves the shard is
+   not already complete. It batches conformers, stores all conformer-level
+   512-dimensional embeddings in compressed NPZ files, and writes a separate
+   hash-validated done manifest.
 4. Finalization and downstream training:
    `scripts/finalize_conforformer_embeddings.py` validates every expected shard
    and writes the global embedding index. `scripts/train_conforformer_downstream.py`
@@ -54,6 +56,7 @@ outputs/conforformer/downstream/<run_id>/
   split_assignments.csv
   leakage_check.json
   excluded_rows.csv
+  morgan_excluded_rows.csv
   selection_results.csv
   metrics.csv
   metrics.json
@@ -70,8 +73,18 @@ models/conforformer_downstream/<run_id>/<split_type>/<pooling>/<feature_set>/<ta
 
 ## Resumability And Provenance
 
+Normal reruns skip conformer generation when the deterministic cache file is
+present and `load_conformer_cache_record(..., expected_cache_key=...)` fully
+validates it. Corrupt or stale cache files are regenerated and atomically
+overwritten; valid files are reported with `cache_hit=true` in the shard status
+JSON.
+
 Normal reruns skip embedding shards only when both the NPZ and done manifest
-validate. Validation checks the NPZ SHA-256, dataset hash, inventory hash,
+validate. The command obtains dictionary/checkpoint metadata, the pinned
+upstream commit, and the exact architecture identity before constructing
+`ConforFormerEncoderAdapter`. A valid completed shard prints
+`shard N already complete`, exits zero, and does not load model weights or touch
+CUDA. Validation checks the NPZ SHA-256, dataset hash, inventory hash,
 checkpoint hash, dictionary hash, upstream ConforFormer commit, architecture
 identity, preprocessing version, conformer configuration hash, pooling
 configuration, expected molecule count, embedding dimension, offsets, and finite
@@ -139,20 +152,40 @@ Monitor jobs with `squeue -u "$USER"` and inspect `outputs/slurm`. Rerun the
 same submit command to resume. Completed shards with matching manifests are
 skipped; invalid shards are regenerated.
 
+To verify a resume did no expensive work, inspect the conformer status files for
+`"cache_hit": true` on already cached molecules and the embedding logs for
+`shard N already complete`. The completed embedding-shard path performs only
+lightweight asset inspection plus manifest/NPZ validation; absence of normal
+`embedded shard N` messages on those shards confirms the encoder path did not
+run.
+
 If finalization fails, inspect the reported shard, remove only the bad shard
 NPZ/done pair if needed, and resubmit the embedding array or the full pipeline.
 
 ## Downstream Training
 
 The primary feature set is one selected pooled 512-dimensional ConforFormer
-embedding plus numeric solvent descriptors and missingness indicators. The
-matched comparison feature set is Morgan fingerprint plus the same solvent
-features. A combined ConforFormer plus Morgan feature set is also supported by
-the training module.
+embedding plus numeric solvent descriptors and missingness indicators. Rows with
+valid embeddings remain eligible for this primary feature set even if Morgan
+fingerprint generation fails. Morgan failures are written to
+`morgan_excluded_rows.csv`.
+
+The matched Morgan comparison feature set is Morgan fingerprint plus the same
+solvent features and uses only rows with valid Morgan fingerprints. The optional
+combined ConforFormer plus Morgan feature set uses the intersection of valid
+ConforFormer embeddings and valid Morgan fingerprints. `metrics.csv`,
+`selection_results.csv`, model metadata, and `training_manifest.json` label
+comparisons as either `full_primary` or `matched_intersection`.
 
 All targets share one fixed 60/20/20 split assignment before target-specific
 label filtering. The required production run uses molecule grouping; scaffold
 grouping is available as a secondary experiment.
+
+ConforFormer-dependent feature sets run the configured pooling methods:
+`mean`, `lowest_energy`, and `boltzmann_298k`. Morgan-only features do not
+depend on ConforFormer pooling and run exactly once with
+`pooling_method=not_applicable`; their output paths and manifests use that
+literal value.
 
 ## Acceptance Criteria
 
@@ -168,16 +201,17 @@ grouping is available as a secondary experiment.
 
 ## Baseline Comparison
 
-Compare ConforFormer primary metrics with the matched Morgan baseline in
-`metrics.csv` by filtering on the same target, split, and model-selection
-protocol:
+Compare ConforFormer primary metrics with the Morgan baselines in `metrics.csv`
+by filtering on the same target, split, model-selection protocol, and
+`comparison_cohort`. `full_primary` uses every row with valid ConforFormer
+embeddings; `matched_intersection` uses rows that are valid for both
+ConforFormer and Morgan.
 
 ```bash
 python - <<'PY'
 import pandas as pd
 m = pd.read_csv("outputs/conforformer/downstream/<run_id>/metrics.csv")
-cols = ["target", "pooling_method", "feature_set", "model", "mae", "rmse", "r2"]
+cols = ["target", "pooling_method", "feature_set", "comparison_cohort", "model", "mae", "rmse", "r2"]
 print(m[cols].sort_values(["target", "pooling_method", "feature_set"]).to_string(index=False))
 PY
 ```
-
