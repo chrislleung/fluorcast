@@ -1,6 +1,5 @@
 #!/bin/bash
 #SBATCH --job-name=cf_embed
-#SBATCH --partition=gpubase_bygpu_b1
 #SBATCH --time=12:00:00
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
