@@ -16,6 +16,10 @@ from .schemas import (
     MoleculeStatus,
 )
 
+RANDOM_COORDINATE_FALLBACK_CONFORMER_COUNTS = (8, 4, 1)
+NORMAL_ETKDG_PROVENANCE = "normal_etkdg_v3"
+RANDOM_COORDINATE_ETKDG_FALLBACK_PROVENANCE = "random_coordinate_etkdg_v3_fallback"
+
 
 def canonicalize_smiles(smiles: str) -> tuple[str | None, str | None]:
     mol = Chem.MolFromSmiles(smiles)
@@ -57,16 +61,63 @@ def _failed_record(
     )
 
 
-def _embed_params(config: ConformerGenerationConfig) -> AllChem.EmbedParameters:
+def _embed_params(
+    config: ConformerGenerationConfig,
+    *,
+    use_random_coords: bool = False,
+) -> AllChem.EmbedParameters:
     params = AllChem.ETKDGv3()
     params.randomSeed = int(config.random_seed)
     params.pruneRmsThresh = float(config.prune_rms_threshold)
+    if use_random_coords:
+        params.useRandomCoords = True
     if hasattr(params, "maxAttempts"):
         params.maxAttempts = int(config.max_attempts)
     elif hasattr(params, "maxIterations"):
         params.maxIterations = int(config.max_attempts)
     params.numThreads = 1
     return params
+
+
+def _embed_conformer_attempts(
+    work_mol: Chem.Mol,
+    *,
+    config: ConformerGenerationConfig,
+    conformer_counts: tuple[int, ...],
+    use_random_coords: bool,
+) -> tuple[Chem.Mol, tuple[int, ...], list[dict[str, Any]]]:
+    embed_attempts: list[dict[str, Any]] = []
+    conf_ids: tuple[int, ...] = ()
+    for count in conformer_counts:
+        attempt_mol = Chem.Mol(work_mol)
+        try:
+            ids = tuple(
+                AllChem.EmbedMultipleConfs(
+                    attempt_mol,
+                    numConfs=int(count),
+                    params=_embed_params(config, use_random_coords=use_random_coords),
+                )
+            )
+        except Exception as exc:
+            attempt = {
+                "count": count,
+                "failure_reason": f"conformer_generation_failed:{type(exc).__name__}",
+            }
+            if use_random_coords:
+                attempt["provenance"] = RANDOM_COORDINATE_ETKDG_FALLBACK_PROVENANCE
+                attempt["useRandomCoords"] = True
+            embed_attempts.append(attempt)
+            continue
+        attempt = {"count": count, "generated_conformers": len(ids)}
+        if use_random_coords:
+            attempt["provenance"] = RANDOM_COORDINATE_ETKDG_FALLBACK_PROVENANCE
+            attempt["useRandomCoords"] = True
+        embed_attempts.append(attempt)
+        if ids:
+            work_mol = attempt_mol
+            conf_ids = ids
+            break
+    return work_mol, conf_ids, embed_attempts
 
 
 def _coordinates(mol: Chem.Mol, conf_id: int) -> list[list[float]]:
@@ -187,28 +238,26 @@ def generate_conformer_cache_record(
     work_mol = Chem.AddHs(mol) if config.add_hydrogens_for_generation else Chem.Mol(mol)
 
     conformer_counts = (config.num_conformers, *config.retry_conformer_counts)
-    embed_attempts: list[dict[str, Any]] = []
-    conf_ids: tuple[int, ...] = ()
-    for count in conformer_counts:
-        attempt_mol = Chem.Mol(work_mol)
-        try:
-            ids = tuple(
-                AllChem.EmbedMultipleConfs(
-                    attempt_mol,
-                    numConfs=int(count),
-                    params=_embed_params(config),
-                )
-            )
-        except Exception as exc:
-            embed_attempts.append(
-                {"count": count, "failure_reason": f"conformer_generation_failed:{type(exc).__name__}"}
-            )
-            continue
-        embed_attempts.append({"count": count, "generated_conformers": len(ids)})
-        if ids:
-            work_mol = attempt_mol
-            conf_ids = ids
-            break
+    work_mol, conf_ids, embed_attempts = _embed_conformer_attempts(
+        work_mol,
+        config=config,
+        conformer_counts=conformer_counts,
+        use_random_coords=False,
+    )
+
+    generation_provenance = NORMAL_ETKDG_PROVENANCE
+    if not conf_ids:
+        fallback_mol, fallback_conf_ids, fallback_attempts = _embed_conformer_attempts(
+            work_mol,
+            config=config,
+            conformer_counts=RANDOM_COORDINATE_FALLBACK_CONFORMER_COUNTS,
+            use_random_coords=True,
+        )
+        embed_attempts.extend(fallback_attempts)
+        if fallback_conf_ids:
+            work_mol = fallback_mol
+            conf_ids = fallback_conf_ids
+            generation_provenance = RANDOM_COORDINATE_ETKDG_FALLBACK_PROVENANCE
 
     cache_key = build_conformer_cache_key(
         canonical_smiles=canonical_smiles,
@@ -257,6 +306,7 @@ def generate_conformer_cache_record(
     metadata = {
         "embed_attempts": embed_attempts,
         "force_field_fallback_count": fallback_count,
+        "generation_provenance": generation_provenance,
         "optimization_notes": optimization_notes,
     }
     return MoleculeConformerCacheRecord(

@@ -1,7 +1,12 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
+import pytest
+
+from chemfluor.conforformer import conformers as conformer_module
+from chemfluor.conforformer.cache import load_conformer_cache_record, save_conformer_cache_record
 from chemfluor.conforformer.config import ConformerGenerationConfig
 from chemfluor.conforformer.conformers import generate_conformer_cache_record
 from chemfluor.conforformer.schemas import MoleculeStatus
@@ -82,3 +87,181 @@ def test_no_successful_conformers_is_failed_record() -> None:
 def test_stereochemistry_is_retained_in_isomeric_canonical_smiles() -> None:
     record = generate_conformer_cache_record("F[C@H](Cl)Br", config=_small_config())
     assert "@" in (record.isomeric_canonical_smiles or "")
+
+
+def _patch_conformer_record_extraction(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        conformer_module,
+        "_optimize_conformer",
+        lambda mol, conf_id, config: ("MMFF94", "converged", float(conf_id), "kcal/mol", []),
+    )
+    monkeypatch.setattr(conformer_module, "_atom_symbols", lambda mol: ["C"])
+    monkeypatch.setattr(conformer_module, "_atomic_numbers", lambda mol: [6])
+    monkeypatch.setattr(
+        conformer_module,
+        "_coordinates",
+        lambda mol, conf_id: [[float(conf_id), 0.0, 0.0]],
+    )
+
+
+def test_normal_etkdg_generation_does_not_invoke_random_coordinate_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_conformer_record_extraction(monkeypatch)
+    calls: list[dict[str, object]] = []
+
+    def embed_multiple_confs(mol, *, numConfs, params):
+        calls.append(
+            {
+                "numConfs": numConfs,
+                "randomSeed": params.randomSeed,
+                "useRandomCoords": params.useRandomCoords,
+            }
+        )
+        return (0, 1)
+
+    monkeypatch.setattr(conformer_module.AllChem, "EmbedMultipleConfs", embed_multiple_confs)
+    config = _small_config(random_seed=1234)
+    record = generate_conformer_cache_record("CCO", config=config)
+
+    assert record.status == MoleculeStatus.OK
+    assert calls == [{"numConfs": 4, "randomSeed": 1234, "useRandomCoords": False}]
+    assert record.metadata["embed_attempts"] == [{"count": 4, "generated_conformers": 2}]
+    assert record.metadata["generation_provenance"] == "normal_etkdg_v3"
+
+
+def test_random_coordinate_fallback_runs_after_normal_attempts_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_conformer_record_extraction(monkeypatch)
+    calls: list[dict[str, object]] = []
+
+    def embed_multiple_confs(mol, *, numConfs, params):
+        calls.append(
+            {
+                "numConfs": numConfs,
+                "randomSeed": params.randomSeed,
+                "useRandomCoords": params.useRandomCoords,
+            }
+        )
+        if params.useRandomCoords and numConfs == 1:
+            return (0,)
+        return ()
+
+    monkeypatch.setattr(conformer_module.AllChem, "EmbedMultipleConfs", embed_multiple_confs)
+    config = ConformerGenerationConfig(num_conformers=16, retry_conformer_counts=(8, 4, 1), random_seed=9876)
+    record = generate_conformer_cache_record("CCO", config=config)
+
+    assert record.status == MoleculeStatus.OK
+    assert [call["numConfs"] for call in calls] == [16, 8, 4, 1, 8, 4, 1]
+    assert [call["useRandomCoords"] for call in calls] == [
+        False,
+        False,
+        False,
+        False,
+        True,
+        True,
+        True,
+    ]
+    assert {call["randomSeed"] for call in calls} == {9876}
+    assert record.metadata["generation_provenance"] == "random_coordinate_etkdg_v3_fallback"
+    assert record.metadata["embed_attempts"][-3:] == [
+        {
+            "count": 8,
+            "generated_conformers": 0,
+            "provenance": "random_coordinate_etkdg_v3_fallback",
+            "useRandomCoords": True,
+        },
+        {
+            "count": 4,
+            "generated_conformers": 0,
+            "provenance": "random_coordinate_etkdg_v3_fallback",
+            "useRandomCoords": True,
+        },
+        {
+            "count": 1,
+            "generated_conformers": 1,
+            "provenance": "random_coordinate_etkdg_v3_fallback",
+            "useRandomCoords": True,
+        },
+    ]
+
+
+def test_successful_random_coordinate_fallback_is_cached_normally(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_conformer_record_extraction(monkeypatch)
+
+    def embed_multiple_confs(mol, *, numConfs, params):
+        if params.useRandomCoords:
+            return (0,)
+        return ()
+
+    monkeypatch.setattr(conformer_module.AllChem, "EmbedMultipleConfs", embed_multiple_confs)
+    config = ConformerGenerationConfig(num_conformers=16, retry_conformer_counts=(8, 4, 1), random_seed=7)
+    record = generate_conformer_cache_record("CCO", config=config)
+    path = save_conformer_cache_record(record, tmp_path)
+    loaded = load_conformer_cache_record(path, expected_cache_key=record.conformer_cache_key)
+
+    assert loaded.to_payload() == record.to_payload()
+    assert loaded.status == MoleculeStatus.OK
+    assert loaded.metadata["generation_provenance"] == "random_coordinate_etkdg_v3_fallback"
+
+
+def test_complete_random_coordinate_fallback_failure_records_no_conformers_generated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[int, bool]] = []
+
+    def embed_multiple_confs(mol, *, numConfs, params):
+        calls.append((numConfs, bool(params.useRandomCoords)))
+        return ()
+
+    monkeypatch.setattr(conformer_module.AllChem, "EmbedMultipleConfs", embed_multiple_confs)
+    config = ConformerGenerationConfig(num_conformers=16, retry_conformer_counts=(8, 4, 1), random_seed=123)
+    record = generate_conformer_cache_record("CCO", config=config)
+
+    assert record.status == MoleculeStatus.FAILED
+    assert record.failure_reason == "no_conformers_generated"
+    assert record.successful_conformer_count == 0
+    assert calls == [
+        (16, False),
+        (8, False),
+        (4, False),
+        (1, False),
+        (8, True),
+        (4, True),
+        (1, True),
+    ]
+
+
+def test_random_coordinate_fallback_is_deterministic_with_same_seed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_conformer_record_extraction(monkeypatch)
+
+    def embed_multiple_confs(mol, *, numConfs, params):
+        if params.useRandomCoords and params.randomSeed == 2468 and numConfs == 4:
+            return (0, 1)
+        return ()
+
+    monkeypatch.setattr(conformer_module.AllChem, "EmbedMultipleConfs", embed_multiple_confs)
+    config = ConformerGenerationConfig(
+        num_conformers=16,
+        retry_conformer_counts=(8, 4, 1),
+        random_seed=2468,
+    )
+    first = generate_conformer_cache_record("CCO", config=config)
+    second = generate_conformer_cache_record("CCO", config=config)
+
+    assert first.conformer_cache_key == second.conformer_cache_key
+    assert first.successful_conformer_count == second.successful_conformer_count
+    assert first.metadata["generation_provenance"] == "random_coordinate_etkdg_v3_fallback"
+    assert second.metadata["generation_provenance"] == "random_coordinate_etkdg_v3_fallback"
+    assert [record.energy for record in first.conformer_records] == [
+        record.energy for record in second.conformer_records
+    ]
+    assert [
+        record.coordinates for record in first.conformer_records
+    ] == [record.coordinates for record in second.conformer_records]
