@@ -9,11 +9,13 @@ import pytest
 from chemfluor.conforformer.cache import load_conformer_cache_record, save_conformer_cache_record
 from chemfluor.conforformer.dictionary import ConforFormerDictionary, load_conforformer_dictionary
 from chemfluor.conforformer.preprocess import (
+    CENTERING_VALIDATION_ATOL,
     ConforFormerPreprocessingConfig,
     PreprocessingError,
     collate_preprocessed_conformers,
     preprocess_conformer,
     preprocess_successful_conformers,
+    validate_preprocessed_record,
 )
 from chemfluor.conforformer.schemas import (
     ConformerRecord,
@@ -88,6 +90,18 @@ def _ethanol_conformer() -> ConformerRecord:
     )
 
 
+def _large_float32_centering_regression_coordinates() -> np.ndarray:
+    rng = np.random.default_rng(0)
+    for _ in range(20_000):
+        coords = (rng.normal(size=(128, 3)) * 10).astype(np.float32)
+        centered = (coords - coords.mean(axis=0, keepdims=True)).astype(np.float32)
+        float32_residual = np.abs(centered.mean(axis=0)).max()
+        float64_residual = np.abs(centered.astype(np.float64).mean(axis=0)).max()
+        if float32_residual > 1e-6 and float64_residual < CENTERING_VALIDATION_ATOL:
+            return coords
+    raise AssertionError("could not construct float32 centering regression coordinates")
+
+
 def test_hydrogen_removal_tokenization_and_alignment(tmp_path: Path) -> None:
     dictionary = _dict(tmp_path)
     molecule = _molecule([_ethanol_conformer()])
@@ -130,6 +144,47 @@ def test_coordinate_centering_special_rows_dtype_and_no_mutation(tmp_path: Path)
     assert np.allclose(record.src_coord[1:-1].mean(axis=0), 0)
     assert record.src_coord.dtype == np.float32
     assert conformer.to_payload() == before
+
+
+def test_validation_accepts_float32_centering_roundoff_below_named_tolerance(tmp_path: Path) -> None:
+    coordinates = _large_float32_centering_regression_coordinates()
+    conformer = _conformer(
+        symbols=["C"] * len(coordinates),
+        atomic_numbers=[6] * len(coordinates),
+        coordinates=coordinates.tolist(),
+    )
+
+    record = preprocess_conformer(_molecule([conformer]), conformer, _dict(tmp_path))
+    heavy_coords = record.src_coord[1:-1]
+
+    assert np.abs(heavy_coords.mean(axis=0)).max() > 1e-6
+    assert np.abs(heavy_coords.astype(np.float64).mean(axis=0)).max() < CENTERING_VALIDATION_ATOL
+    validate_preprocessed_record(record)
+
+
+def test_validation_rejects_genuinely_shifted_centered_coordinates(tmp_path: Path) -> None:
+    conformer = _conformer(symbols=["C", "O"], atomic_numbers=[6, 8], coordinates=[[0, 0, 0], [2, 0, 0]])
+    record = preprocess_conformer(_molecule([conformer]), conformer, _dict(tmp_path))
+    record.src_coord[1:-1] += np.asarray([1e-3, 0.0, 0.0], dtype=np.float32)
+
+    assert np.abs(record.src_coord[1:-1].astype(np.float64).mean(axis=0)).max() >= 1e-3
+    with pytest.raises(ValueError, match="centered heavy-atom coordinates"):
+        validate_preprocessed_record(record)
+
+
+def test_validation_preserves_normal_preprocessing_encoder_arrays(tmp_path: Path) -> None:
+    conformer = _ethanol_conformer()
+    record = preprocess_conformer(_molecule([conformer]), conformer, _dict(tmp_path))
+    src_coord = record.src_coord.copy()
+    src_distance = record.src_distance.copy()
+    src_edge_type = record.src_edge_type.copy()
+
+    validate_preprocessed_record(record)
+
+    assert record.src_coord.dtype == np.float32
+    assert np.array_equal(record.src_coord, src_coord)
+    assert np.array_equal(record.src_distance, src_distance)
+    assert np.array_equal(record.src_edge_type, src_edge_type)
 
 
 def test_distances_are_hand_calculated_and_include_special_rows(tmp_path: Path) -> None:

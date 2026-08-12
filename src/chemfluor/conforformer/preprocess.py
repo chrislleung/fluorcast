@@ -13,6 +13,7 @@ from .schemas import ConformerRecord, GenerationStatus, MoleculeConformerCacheRe
 
 
 DEFAULT_PREPROCESS_VERSION = "fluorcast-conforformer-preprocess-v2-runtime-mask-vocab"
+CENTERING_VALIDATION_ATOL = 1e-5
 
 
 PADDING_RULE_SOURCES = {
@@ -246,7 +247,8 @@ def validate_preprocessed_record(record: PreprocessedConformerRecord) -> None:
         raise ValueError("coordinates and distances must be finite")
     if record.heavy_atom_count > 0:
         heavy_coords = coord[1:-1]
-        if not np.allclose(heavy_coords.mean(axis=0), 0.0, atol=1e-6):
+        heavy_centroid = heavy_coords.astype(np.float64).mean(axis=0)
+        if not np.allclose(heavy_centroid, 0.0, atol=CENTERING_VALIDATION_ATOL, rtol=0.0):
             raise ValueError("centered heavy-atom coordinates must have near-zero mean")
     if int(tokens[0]) != record.dictionary_cls_id:
         raise ValueError("first token must be [CLS]")
