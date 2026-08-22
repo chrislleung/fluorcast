@@ -158,14 +158,34 @@ def _assign_groups(groups: pd.Series, *, seed: int) -> dict[str, str]:
 
 
 def make_split_assignments(rows: pd.DataFrame, *, split_type: str = "molecule", seed: int = 0) -> tuple[pd.DataFrame, dict[str, Any]]:
-    if split_type not in {"molecule", "scaffold"}:
-        raise ValueError("split_type must be molecule or scaffold")
+    if split_type not in {"random", "molecule", "scaffold"}:
+        raise ValueError("split_type must be random, molecule, or scaffold")
     frame = rows.copy()
-    if split_type == "molecule":
-        frame["split_group"] = frame["canonical_chromophore_smiles"].astype(str)
+
+    if split_type == "random":
+        frame["split_group"] = frame["row_id"].astype(str)
+
+        rng = np.random.default_rng(seed)
+        order = np.arange(len(frame))
+        rng.shuffle(order)
+
+        total = len(frame)
+        n_base = int(round(0.6 * total))
+        n_selection = int(round(0.2 * total))
+
+        labels = np.empty(total, dtype=object)
+        labels[order[:n_base]] = "base_train"
+        labels[order[n_base:n_base + n_selection]] = "model_selection"
+        labels[order[n_base + n_selection:]] = "final_test"
+
+        mapping = dict(zip(frame["split_group"].astype(str), labels))
     else:
-        frame["split_group"] = frame["canonical_chromophore_smiles"].map(scaffold_for_smiles)
-    mapping = _assign_groups(frame["split_group"], seed=seed)
+        if split_type == "molecule":
+            frame["split_group"] = frame["canonical_chromophore_smiles"].astype(str)
+        else:
+            frame["split_group"] = frame["canonical_chromophore_smiles"].map(scaffold_for_smiles)
+
+        mapping = _assign_groups(frame["split_group"], seed=seed)
     out = pd.DataFrame(
         {
             "row_id": frame["row_id"].to_numpy(),
