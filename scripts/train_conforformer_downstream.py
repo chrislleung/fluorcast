@@ -21,7 +21,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--solvent-descriptors", type=Path, default=Path("data/solvent_descriptors_expanded_deep4chem.csv"))
     parser.add_argument("--out-dir", type=Path, required=True)
     parser.add_argument("--model-out-dir", type=Path, required=True)
-    parser.add_argument("--split-type", choices=["molecule", "scaffold"], default="molecule")
+    parser.add_argument("--split-type", choices=["random", "molecule", "scaffold"], default="molecule")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--n-jobs", type=int, default=-1)
     return parser.parse_args()
