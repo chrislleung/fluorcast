@@ -464,6 +464,74 @@ sbatch slurm/run_full_paired_scaffold.sbatch
 
 ## Predicting New Molecules
 
+### Predicting custom molecules with ConforFormer
+
+Use this path when you want the trained ConforFormer downstream models rather
+than the hybrid production workflow. It generates a fresh ConforFormer embedding
+for a new chromophore SMILES, combines it with the same Morgan fingerprint and
+solvent descriptor representation used in downstream training, validates the
+saved feature schema, and loads saved models only.
+
+Single case:
+
+```bash
+cd ~/scratch/FluorCast-conforformer
+PY="$HOME/scratch/venvs/fluorcast-conforformer/bin/python"
+
+"$PY" scripts/predict_conforformer_case.py \
+  --smiles "YOUR_CHROMOPHORE_SMILES" \
+  --solvent-smiles "O" \
+  --model-root "models/conforformer_downstream/<run_id>" \
+  --device cuda
+```
+
+Batch CSV:
+
+```bash
+"$PY" scripts/predict_conforformer_case.py \
+  --input-csv case_studies.csv \
+  --output-csv case_study_predictions.csv \
+  --model-root "models/conforformer_downstream/<run_id>" \
+  --device auto
+```
+
+The batch input requires `smiles` and `solvent_smiles`; `name` is optional. The
+output includes canonicalized SMILES, `absorption_nm`, `emission_nm`,
+`quantum_yield`, `stokes_shift_nm`, `derived_stokes_shift_nm`, `stokes_source`,
+`status`, and `error`.
+
+By default the script expects the molecule split, `mean` pooled ConforFormer
+embedding, and `conforformer_morgan_solvent` representation. The corresponding
+model directories are:
+
+```text
+models/conforformer_downstream/<run_id>/molecule/mean/conforformer_morgan_solvent/<target>/
+```
+
+`stokes_shift_nm` is reported from the direct trained Stokes model when that
+target artifact exists. The script always also reports `derived_stokes_shift_nm`
+as predicted emission minus predicted absorption. If the direct Stokes target is
+not present, `stokes_shift_nm` is derived and `stokes_source` is `derived`.
+
+Use `--model-root` to point at a specific downstream run. If omitted, the script
+looks for a single discoverable run under `models/conforformer_downstream/`, or
+uses `training_manifest.json` metadata to choose among runs with saved models.
+Use `--device auto`, `--device cpu`, or `--device cuda` for encoder inference.
+New pooled embeddings are cached by default under
+`.cache/conforformer_inference/`; cache keys include the canonical SMILES,
+checkpoint hash, dictionary hash, conformer configuration, preprocessing
+configuration, and pooling configuration.
+
+JSON output for one case:
+
+```bash
+"$PY" scripts/predict_conforformer_case.py \
+  --smiles "YOUR_CHROMOPHORE_SMILES" \
+  --solvent-smiles "O" \
+  --model-root "models/conforformer_downstream/<run_id>" \
+  --json
+```
+
 ### Full hybrid prediction, recommended
 
 The preferred end-to-end workflow predicts absorption, emission, quantum yield,
@@ -753,4 +821,3 @@ python scripts/check_molecule_in_dataset.py \
 
 Use `--smiles-column` and `--solvent-column` for datasets with nonstandard column
 names. Invalid dataset SMILES are skipped and counted in the terminal summary.
-
