@@ -121,3 +121,10 @@ final_hybrid_stokes_results.tar.gz
 
 # Local ConforFormer smoke-test cache
 data/processed/conforformer_smoke_cache/
+
+# Local inference/cache files
+.cache/
+
+# Temporary script backups
+*.before_morgan_cli
+*.before_morgan_fix
