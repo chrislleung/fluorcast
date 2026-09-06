@@ -29,7 +29,19 @@ def _feature_order(solvent_columns: list[str] | None = None) -> list[str]:
     )
 
 
-def _model_root(tmp_path: Path, *, include_stokes: bool = True, feature_order: list[str] | None = None) -> Path:
+def _morgan_feature_order(solvent_columns: list[str] | None = None) -> list[str]:
+    solvent_columns = solvent_columns or ["molecular_weight", "molecular_weight__missing"]
+    return [f"morgan_{idx:04d}" for idx in range(2048)] + solvent_columns
+
+
+def _model_root(
+    tmp_path: Path,
+    *,
+    include_stokes: bool = True,
+    feature_order: list[str] | None = None,
+    pooling_method: str = "mean",
+    feature_set: str = "conforformer_morgan_solvent",
+) -> Path:
     root = tmp_path / "models"
     values = {
         "absorption_nm": 410.0,
@@ -40,15 +52,15 @@ def _model_root(tmp_path: Path, *, include_stokes: bool = True, feature_order: l
     for target, value in values.items():
         if target == "stokes_shift_nm" and not include_stokes:
             continue
-        target_dir = root / "molecule" / "mean" / "conforformer_morgan_solvent" / target
+        target_dir = root / "molecule" / pooling_method / feature_set / target
         target_dir.mkdir(parents=True)
         joblib.dump(ConstantEstimator(value), target_dir / "model.joblib")
         (target_dir / "feature_metadata.json").write_text(
             json.dumps(
                 {
                     "feature_order": feature_order or _feature_order(),
-                    "pooling_method": "mean",
-                    "feature_set": "conforformer_morgan_solvent",
+                    "pooling_method": pooling_method,
+                    "feature_set": feature_set,
                     "selected_candidate": "constant",
                 }
             ),
@@ -100,7 +112,13 @@ def _common(tmp_path: Path, model_root: Path) -> dict:
 def test_cli_parsing_single_csv_and_invalid_combinations(tmp_path: Path) -> None:
     single = predict_script.parse_args(["--smiles", "CCO", "--solvent-smiles", "O"])
     assert single.smiles == "CCO"
-    batch = predict_script.parse_args(["--input-csv", str(tmp_path / "cases.csv"), "--output-csv", str(tmp_path / "out.csv")])
+    morgan = predict_script.parse_args(
+        ["--smiles", "CCO", "--solvent-smiles", "O", "--feature-set", "morgan_solvent", "--pooling", "not_applicable"]
+    )
+    assert morgan.pooling == "not_applicable"
+    batch = predict_script.parse_args(
+        ["--input-csv", str(tmp_path / "cases.csv"), "--output-csv", str(tmp_path / "out.csv")]
+    )
     assert batch.input_csv.name == "cases.csv"
     with pytest.raises(SystemExit):
         predict_script.parse_args(["--smiles", "CCO"])
@@ -190,3 +208,61 @@ def test_json_output_is_parseable(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     ) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["predictions"]["derived_stokes_shift_nm"] == pytest.approx(80.0)
+
+
+def test_morgan_only_not_applicable_does_not_load_or_embed_conforformer(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    model_root = _model_root(
+        tmp_path,
+        include_stokes=False,
+        feature_order=_morgan_feature_order(),
+        pooling_method="not_applicable",
+        feature_set="morgan_solvent",
+    )
+    monkeypatch.setattr(
+        predict_script,
+        "embed_smiles",
+        lambda *args, **kwargs: pytest.fail("Morgan-only inference must not call embed_smiles"),
+    )
+    monkeypatch.setattr(
+        predict_script,
+        "ConforFormerEncoderAdapter",
+        lambda *args, **kwargs: pytest.fail("Morgan-only inference must not load the ConforFormer encoder"),
+    )
+    monkeypatch.setattr(
+        predict_script,
+        "load_conforformer_dictionary",
+        lambda *args, **kwargs: pytest.fail("Morgan-only inference must not load the ConforFormer dictionary"),
+    )
+    monkeypatch.setattr(
+        predict_script,
+        "morgan_fingerprint",
+        lambda *args, **kwargs: np.ones(2048, dtype=np.float32),
+    )
+
+    assert predict_script.main(
+        [
+            "--smiles",
+            "CCO",
+            "--solvent-smiles",
+            "O",
+            "--model-root",
+            str(model_root),
+            "--solvent-descriptors",
+            str(_solvent_descriptors(tmp_path)),
+            "--feature-set",
+            "morgan_solvent",
+            "--pooling",
+            "not_applicable",
+            "--json",
+        ]
+    ) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["metadata"]["pooling_method"] == "not_applicable"
+    assert payload["metadata"]["feature_set"] == "morgan_solvent"
+    assert payload["metadata"]["feature_dimensions"] == {"conforformer": 0, "morgan": 2048, "solvent": 2}
+    assert payload["metadata"]["embedding_cache_key"] is None
+    assert payload["metadata"]["embedding_cache_hit"] is False

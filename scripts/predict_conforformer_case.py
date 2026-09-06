@@ -112,8 +112,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     parser.add_argument("--json", action="store_true", help="Emit JSON for single-case prediction.")
     parser.add_argument("--split-type", choices=["molecule", "scaffold"], default=DEFAULT_SPLIT)
-    parser.add_argument("--pooling", choices=["mean", "lowest_energy", "boltzmann_298k"], default=DEFAULT_POOLING)
-    parser.add_argument("--feature-set", choices=["conforformer_solvent", "morgan_solvent", "conforformer_morgan_solvent"], default=DEFAULT_FEATURE_SET)
+    parser.add_argument("--pooling", choices=["mean", "lowest_energy", "boltzmann_298k", "not_applicable"], default=DEFAULT_POOLING)
+    parser.add_argument(
+        "--feature-set",
+        choices=["conforformer_solvent", "morgan_solvent", "conforformer_morgan_solvent"],
+        default=DEFAULT_FEATURE_SET,
+    )
     args = parser.parse_args(argv)
     if args.smiles and not args.solvent_smiles:
         parser.error("--solvent-smiles is required with --smiles")
@@ -121,6 +125,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--solvent-smiles is only valid with --smiles")
     if args.input_csv and args.json:
         parser.error("--json is only valid with single-case --smiles mode")
+    if args.pooling == "not_applicable" and args.feature_set != "morgan_solvent":
+        parser.error("--pooling not_applicable is only valid with --feature-set morgan_solvent")
     return args
 
 
@@ -164,6 +170,8 @@ def resolve_model_root(model_root: Path | None) -> Path:
 
 def target_model_dir(model_root: Path, *, split_type: str, pooling: str, feature_set: str, target: str) -> Path:
     root = Path(model_root)
+    if feature_set == "morgan_solvent":
+        pooling = "not_applicable"
     direct = root / split_type / pooling / feature_set / target
     if direct.exists():
         return direct
@@ -383,31 +391,49 @@ def build_case_features(
     pooling_method: str,
     feature_set: str,
 ) -> CaseFeatures:
-    validate_smiles(smiles, label="chromophore")
+    canonical = validate_smiles(smiles, label="chromophore")
     validate_smiles(solvent_smiles, label="solvent")
-    embedding, canonical, cache_key, cache_hit = embed_smiles(
-        smiles,
-        adapter=adapter,
-        dictionary=dictionary,
-        checkpoint_path=checkpoint_path,
-        dictionary_path=dictionary_path,
-        cache_dir=cache_dir,
-        pooling_method=pooling_method,
-    )
-    canonical_solvent = validate_smiles(solvent_smiles, label="solvent")
+    embedding: np.ndarray | None = None
+    cache_key: str | None = None
+    cache_hit = False
+    if feature_set in {"conforformer_solvent", "conforformer_morgan_solvent"}:
+        embedding, canonical, cache_key, cache_hit = embed_smiles(
+            smiles,
+            adapter=adapter,
+            dictionary=dictionary,
+            checkpoint_path=checkpoint_path,
+            dictionary_path=dictionary_path,
+            cache_dir=cache_dir,
+            pooling_method=pooling_method,
+        )
     fp = morgan_fingerprint(canonical, radius=2, n_bits=2048)
     if fp is None:
         raise ValueError(f"Morgan fingerprint generation failed for chromophore SMILES: {smiles}")
     solvent_values, canonical_solvent = solvent_descriptor_frame(solvent_smiles, solvent_descriptor_path)
     solvent_columns = list(solvent_values.columns)
-    names = feature_names(pooling=pooling_method, feature_set=feature_set, solvent_columns=solvent_columns, n_bits=2048)
-    values: list[float] = []
+    generated_names = feature_names(pooling=pooling_method, feature_set=feature_set, solvent_columns=solvent_columns, n_bits=2048)
+    feature_values: dict[str, float] = {}
     if feature_set in {"conforformer_solvent", "conforformer_morgan_solvent"}:
-        values.extend(float(value) for value in embedding)
+        if embedding is None:
+            raise ValueError("ConforFormer features were requested but no embedding was calculated")
+        feature_values.update(
+            (f"conforformer_{pooling_method}_{idx:03d}", float(value))
+            for idx, value in enumerate(embedding)
+        )
     if feature_set in {"morgan_solvent", "conforformer_morgan_solvent"}:
-        values.extend(float(value) for value in fp)
-    values.extend(float(value) if pd.notna(value) else np.nan for value in solvent_values.iloc[0].to_list())
-    frame = pd.DataFrame([values], columns=names)
+        feature_values.update((f"morgan_{idx:04d}", float(value)) for idx, value in enumerate(fp))
+    feature_values.update(
+        (name, float(value) if pd.notna(value) else np.nan)
+        for name, value in zip(solvent_columns, solvent_values.iloc[0].to_list())
+    )
+    missing_generated = [name for name in generated_names if name not in feature_values]
+    if missing_generated:
+        raise ValueError(f"Internal feature generation missed expected feature(s): {missing_generated[:10]}")
+    missing_expected = [name for name in expected_feature_order if name not in feature_values]
+    if missing_expected:
+        frame = pd.DataFrame([feature_values], columns=generated_names)
+        validate_feature_schema(frame, expected_feature_order)
+    frame = pd.DataFrame([[feature_values[name] for name in expected_feature_order]], columns=expected_feature_order)
     validate_feature_schema(frame, expected_feature_order)
     return CaseFeatures(
         canonical_smiles=canonical,
@@ -586,13 +612,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         model_root = resolve_model_root(args.model_root)
         models = load_target_models(model_root, split_type=args.split_type, pooling=args.pooling, feature_set=args.feature_set)
-        dictionary = load_conforformer_dictionary(args.dictionary)
-        adapter = ConforFormerEncoderAdapter(
-            dictionary_path=args.dictionary,
-            checkpoint_path=args.checkpoint,
-            device=args.device,
-            root=PROJECT_ROOT,
-        )
+        if args.feature_set == "morgan_solvent":
+            dictionary = None
+            adapter = None
+        else:
+            dictionary = load_conforformer_dictionary(args.dictionary)
+            adapter = ConforFormerEncoderAdapter(
+                dictionary_path=args.dictionary,
+                checkpoint_path=args.checkpoint,
+                device=args.device,
+                root=PROJECT_ROOT,
+            )
         common = {
             "models": models,
             "adapter": adapter,
