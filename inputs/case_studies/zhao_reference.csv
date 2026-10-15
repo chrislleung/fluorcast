@@ -1,0 +1,6 @@
+name,solvent_name,experimental_absorption_nm,experimental_emission_nm,experimental_quantum_yield,experimental_plqy_percent,experimental_stokes_nm,reported_stokes_cm1
+Zhao_1,CH3CN,497,506,0.55,55,9,
+Zhao_2,DMF,398,451,0.816,81.6,53,
+Zhao_3,CH2Cl2,411,569,0.76,76,158,6756
+Zhao_4,Toluene,439,453,0.98,98,14,
+Zhao_5,DMSO,770,786,0.0999,9.99,16,

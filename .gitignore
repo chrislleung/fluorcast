@@ -76,6 +76,15 @@ models/
 
 # Candidate-screening outputs are generated and reproducible.
 data/generated_candidates/
+data/processed/conforformer_cache/
+outputs/conforformer/full_dataset/
+outputs/conforformer/downstream/
+models/conforformer_downstream/
+conforformer_preprocess_diagnostics/
+conforformer_encoder_diagnostics/
+assets/conforformer/checkpoints/
+assets/conforformer/dictionaries/
+assets/conforformer/downloads/
 #data/processed/fluodb_lite/
 outputs/candidate_screening/
 
@@ -109,3 +118,16 @@ outputs/candidate_screening/
 paper_comparison_full_20260625_0920.tar.gz
 hybrid predictions/
 final_hybrid_stokes_results.tar.gz
+
+# Local ConforFormer smoke-test cache
+data/processed/conforformer_smoke_cache/
+
+# Local inference/cache files
+.cache/
+
+# Temporary script backups
+*.before_morgan_cli
+*.before_morgan_fix
+
+# Scatter plot 
+qy_scatter_updated

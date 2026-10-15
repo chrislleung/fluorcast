@@ -464,6 +464,74 @@ sbatch slurm/run_full_paired_scaffold.sbatch
 
 ## Predicting New Molecules
 
+### Predicting custom molecules with ConforFormer
+
+Use this path when you want the trained ConforFormer downstream models rather
+than the hybrid production workflow. It generates a fresh ConforFormer embedding
+for a new chromophore SMILES, combines it with the same Morgan fingerprint and
+solvent descriptor representation used in downstream training, validates the
+saved feature schema, and loads saved models only.
+
+Single case:
+
+```bash
+cd ~/scratch/FluorCast-conforformer
+PY="$HOME/scratch/venvs/fluorcast-conforformer/bin/python"
+
+"$PY" scripts/predict_conforformer_case.py \
+  --smiles "YOUR_CHROMOPHORE_SMILES" \
+  --solvent-smiles "O" \
+  --model-root "models/conforformer_downstream/<run_id>" \
+  --device cuda
+```
+
+Batch CSV:
+
+```bash
+"$PY" scripts/predict_conforformer_case.py \
+  --input-csv case_studies.csv \
+  --output-csv case_study_predictions.csv \
+  --model-root "models/conforformer_downstream/<run_id>" \
+  --device auto
+```
+
+The batch input requires `smiles` and `solvent_smiles`; `name` is optional. The
+output includes canonicalized SMILES, `absorption_nm`, `emission_nm`,
+`quantum_yield`, `stokes_shift_nm`, `derived_stokes_shift_nm`, `stokes_source`,
+`status`, and `error`.
+
+By default the script expects the molecule split, `mean` pooled ConforFormer
+embedding, and `conforformer_morgan_solvent` representation. The corresponding
+model directories are:
+
+```text
+models/conforformer_downstream/<run_id>/molecule/mean/conforformer_morgan_solvent/<target>/
+```
+
+`stokes_shift_nm` is reported from the direct trained Stokes model when that
+target artifact exists. The script always also reports `derived_stokes_shift_nm`
+as predicted emission minus predicted absorption. If the direct Stokes target is
+not present, `stokes_shift_nm` is derived and `stokes_source` is `derived`.
+
+Use `--model-root` to point at a specific downstream run. If omitted, the script
+looks for a single discoverable run under `models/conforformer_downstream/`, or
+uses `training_manifest.json` metadata to choose among runs with saved models.
+Use `--device auto`, `--device cpu`, or `--device cuda` for encoder inference.
+New pooled embeddings are cached by default under
+`.cache/conforformer_inference/`; cache keys include the canonical SMILES,
+checkpoint hash, dictionary hash, conformer configuration, preprocessing
+configuration, and pooling configuration.
+
+JSON output for one case:
+
+```bash
+"$PY" scripts/predict_conforformer_case.py \
+  --smiles "YOUR_CHROMOPHORE_SMILES" \
+  --solvent-smiles "O" \
+  --model-root "models/conforformer_downstream/<run_id>" \
+  --json
+```
+
 ### Full hybrid prediction, recommended
 
 The preferred end-to-end workflow predicts absorption, emission, quantum yield,
@@ -711,6 +779,427 @@ This is especially important for outside-domain molecules.
 
 ---
 
+ 
+## ConforFormer: 3D Molecular Representations
+
+FluorCast integrates **ConforFormer**, a pretrained molecular representation model that uses 3D molecular conformations to generate learned molecular embeddings.
+
+Unlike conventional Morgan fingerprints, which encode local molecular connectivity, ConforFormer incorporates conformer-dependent geometric information into its learned representations.
+
+The ConforFormer workflow supports prediction of:
+
+- Absorption wavelength (`absorption_nm`)
+- Emission wavelength (`emission_nm`)
+- Quantum yield (`quantum_yield`)
+- Stokes shift (`stokes_shift_nm`)
+
+### 1. Model Architecture
+
+The ConforFormer pipeline follows these steps:
+
+```text
+Chromophore SMILES
+    |
+    v
+RDKit canonicalization
+    |
+    v
+3D conformer generation
+    |
+    v
+Pretrained ConforFormer encoder
+    |
+    v
+512-dimensional conformer embeddings
+    |
+    v
+Conformer pooling
+    |
+    +---- Mean pooling
+    +---- Lowest-energy pooling
+    +---- Boltzmann-weighted pooling (298 K)
+    |
+    v
+Molecular embedding + solvent descriptors
+    |
+    v
+Downstream supervised regression
+    |
+    v
+Absorption / Emission / Quantum Yield / Stokes Shift
+```
+
+Three molecular feature configurations are supported:
+
+| Feature set | Description |
+|---|---|
+| `conforformer_solvent` | ConforFormer embedding + solvent descriptors |
+| `morgan_solvent` | Morgan fingerprint + solvent descriptors |
+| `conforformer_morgan_solvent` | ConforFormer embedding + Morgan fingerprint + solvent descriptors |
+
+The Morgan-only configuration provides a baseline for evaluating the contribution of 3D molecular representations.
+
+### 2. Environment Setup
+
+The ConforFormer encoder requires a separate compatible Python environment with PyTorch, RDKit, and the upstream Uni-Core/Uni-Mol dependencies.
+
+The Nibi workflow uses the following environment path:
+
+```bash
+cd ~/scratch/FluorCast
+
+module purge
+module load python/3.11
+module load gcc
+module load rdkit
+
+export FLUORCAST_PYTHON="$HOME/scratch/venvs/fluorcast-conforformer/bin/python"
+```
+
+The environment must be provisioned with compatible encoder dependencies before running the pipeline. Installing the standard FluorCast requirements alone is not sufficient.
+
+Initialize the upstream ConforFormer submodule:
+
+```bash
+git submodule update --init --recursive
+```
+
+Verify the environment:
+
+```bash
+"$FLUORCAST_PYTHON" -c "import torch, rdkit; print('PyTorch:', torch.__version__); print('CUDA:', torch.cuda.is_available())"
+
+"$FLUORCAST_PYTHON" scripts/smoke_conforformer_encoder.py --env-report
+```
+
+Detailed dependency setup and compatibility instructions are available in:
+
+- `docs/conforformer/WSL2_ENCODER_SETUP.md`
+- `docs/conforformer/LOCAL_ENCODER_COMPATIBILITY.md`
+- `docs/conforformer/CHECKPOINT_ASSET_MAP.md`
+
+### 3. Required Model Assets
+
+The pretrained ConforFormer checkpoint must be available locally:
+
+```text
+models/conforformer/ConforFormer.pt
+```
+
+The repository includes the dictionary configuration:
+
+```text
+configs/conforformer/OMOL_full_dict.txt
+```
+
+**Note:** Pretrained checkpoint weights and trained downstream model artifacts are not tracked in Git. Download or transfer the checkpoint separately and verify its compatibility with the dictionary and encoder.
+
+The upstream checkpoint is available from:
+
+https://huggingface.co/ConforFormer/ConforFormer
+
+### 4. Training ConforFormer Models
+
+The full training workflow uses the standardized FluorCast dataset:
+
+```text
+data/processed/fluodb_lite/combined_deduplicated.csv
+```
+
+The training process consists of four main stages:
+
+1. Generate an inventory of unique chromophores.
+2. Generate and cache 3D molecular conformers.
+3. Extract ConforFormer embeddings using GPU inference.
+4. Train solvent-aware downstream regression models.
+
+The included Slurm scripts automate the full workflow.
+
+#### Run a Small Validation Experiment
+
+Before submitting the full dataset, run a small canary experiment:
+
+```bash
+cd ~/scratch/FluorCast
+
+export FLUORCAST_PYTHON="$HOME/scratch/venvs/fluorcast-conforformer/bin/python"
+
+export FLUORCAST_DATASET="data/processed/fluodb_lite/combined_deduplicated.csv"
+
+export FLUORCAST_CHECKPOINT="models/conforformer/ConforFormer.pt"
+
+export FLUORCAST_DICTIONARY="configs/conforformer/OMOL_full_dict.txt"
+
+export FLUORCAST_MAX_MOLECULES=256
+export FLUORCAST_SHARD_SIZE=128
+
+export FLUORCAST_RUN_ID="canary_$(date -u +%Y%m%dT%H%M%SZ)"
+
+mkdir -p outputs/slurm
+
+bash slurm/conforformer/submit_full_pipeline.sh
+```
+
+#### Train on the Full Dataset
+
+Once the validation run is successful:
+
+```bash
+cd ~/scratch/FluorCast
+
+export FLUORCAST_PYTHON="$HOME/scratch/venvs/fluorcast-conforformer/bin/python"
+
+export FLUORCAST_DATASET="data/processed/fluodb_lite/combined_deduplicated.csv"
+
+export FLUORCAST_CHECKPOINT="models/conforformer/ConforFormer.pt"
+
+export FLUORCAST_DICTIONARY="configs/conforformer/OMOL_full_dict.txt"
+
+unset FLUORCAST_MAX_MOLECULES
+
+export FLUORCAST_SHARD_SIZE=128
+
+export FLUORCAST_RUN_ID="full_$(date -u +%Y%m%dT%H%M%SZ)"
+
+mkdir -p outputs/slurm
+
+bash slurm/conforformer/submit_full_pipeline.sh
+```
+
+The submission script automatically schedules CPU conformer generation, GPU embedding extraction, embedding finalization, and downstream model training using Slurm dependencies.
+
+Monitor jobs:
+
+```bash
+squeue -u "$USER"
+```
+
+Inspect logs:
+
+```bash
+ls -lh outputs/slurm/
+```
+
+#### Downstream Training Configuration
+
+The default downstream workflow uses a molecule-grouped split to reduce leakage between training and evaluation.
+
+The training, validation, and test proportions are:
+
+```text
+Training:   60%
+Validation: 20%
+Test:       20%
+```
+
+A scaffold-grouped split is also supported.
+
+The downstream trainer evaluates ConforFormer representations, Morgan fingerprints, and feature fusion, using available target labels and fixed split assignments.
+
+It supports three ConforFormer pooling methods:
+
+- `mean`
+- `lowest_energy`
+- `boltzmann_298k`
+
+To train downstream models manually using existing embeddings:
+
+```bash
+"$FLUORCAST_PYTHON" scripts/train_conforformer_downstream.py \
+  --dataset data/processed/fluodb_lite/combined_deduplicated.csv \
+  --embedding-run-root outputs/conforformer/full_dataset/YOUR_RUN_ID \
+  --solvent-descriptors data/solvent_descriptors_expanded_deep4chem.csv \
+  --out-dir outputs/conforformer/downstream/YOUR_RUN_ID \
+  --model-out-dir models/conforformer_downstream/YOUR_RUN_ID \
+  --split-type molecule \
+  --seed 0 \
+  --n-jobs 16
+```
+
+Replace `YOUR_RUN_ID` with the actual training run identifier.
+
+### 5. Training Outputs
+
+The embedding pipeline writes its results under:
+
+```text
+outputs/conforformer/full_dataset/<run_id>/
+```
+
+This directory contains:
+
+```text
+inventory/
+conformer_status/
+embeddings/
+embedding_index.csv
+embedding_manifest.json
+embedding_summary.json
+failed_molecules.csv
+```
+
+Downstream training results are written to:
+
+```text
+outputs/conforformer/downstream/<run_id>/
+```
+
+Important files include:
+
+```text
+metrics.csv
+metrics.json
+selection_results.csv
+split_assignments.csv
+leakage_check.json
+training_manifest.json
+predictions/
+reports/
+```
+
+Trained model artifacts are stored under:
+
+```text
+models/conforformer_downstream/<run_id>/<split_type>/<pooling>/<feature_set>/<target>/
+```
+
+Each trained target directory contains a saved estimator (`model.joblib`) and its feature metadata (`feature_metadata.json`).
+
+### 6. Predicting New Molecules
+
+The ConforFormer prediction script supports individual chromophores and batch CSV input.
+
+For new molecules, the script:
+
+1. Canonicalizes the chromophore and solvent SMILES.
+2. Generates conformers and ConforFormer embeddings.
+3. Constructs the selected molecular and solvent features.
+4. Loads previously trained downstream estimators.
+5. Predicts molecular properties without retraining.
+
+#### Single-Molecule Prediction
+
+For example, predict molecular properties in ethanol:
+
+```bash
+cd ~/scratch/FluorCast
+
+"$FLUORCAST_PYTHON" scripts/predict_conforformer_case.py \
+  --smiles "c1ccccc1" \
+  --solvent-smiles "CCO" \
+  --model-root models/conforformer_downstream/YOUR_RUN_ID \
+  --checkpoint models/conforformer/ConforFormer.pt \
+  --dictionary configs/conforformer/OMOL_full_dict.txt \
+  --split-type molecule \
+  --pooling mean \
+  --feature-set conforformer_morgan_solvent \
+  --device cuda
+```
+
+Replace `YOUR_RUN_ID` with a trained run containing the requested model artifacts.
+
+This example uses benzene in ethanol to demonstrate the prediction interface; it is not intended as a validated fluorescence benchmark.
+
+For JSON output, add:
+
+```bash
+--json
+```
+
+For CPU inference, use `--device cpu`. Alternatively, use `--device auto` to select an available device.
+
+#### Batch Prediction
+
+Prepare a CSV with the following columns:
+
+```csv
+name,smiles,solvent_smiles
+Molecule_1,c1ccccc1,CCO
+Molecule_2,c1ccncc1,O
+```
+
+Run:
+
+```bash
+"$FLUORCAST_PYTHON" scripts/predict_conforformer_case.py \
+  --input-csv inputs/my_molecules.csv \
+  --output-csv outputs/predictions/conforformer_batch.csv \
+  --model-root models/conforformer_downstream/YOUR_RUN_ID \
+  --split-type molecule \
+  --pooling mean \
+  --feature-set conforformer_morgan_solvent \
+  --device cuda
+```
+
+The output CSV includes:
+
+```text
+name
+smiles
+canonical_smiles
+solvent_smiles
+canonical_solvent_smiles
+absorption_nm
+emission_nm
+quantum_yield
+stokes_shift_nm
+derived_stokes_shift_nm
+stokes_source
+status
+error
+```
+
+If a direct Stokes-shift model is available, `stokes_shift_nm` contains its prediction. Otherwise, the value is derived from predicted emission minus predicted absorption. `derived_stokes_shift_nm` always reports the latter calculation.
+
+#### Alternative Feature Configurations
+
+To predict using only ConforFormer embeddings and solvent descriptors:
+
+```bash
+--feature-set conforformer_solvent --pooling mean
+```
+
+To predict using the Morgan baseline:
+
+```bash
+--feature-set morgan_solvent --pooling not_applicable
+```
+
+The corresponding trained model artifacts must exist.
+
+### 7. Model Validation
+
+Run the ConforFormer tests:
+
+```bash
+python -m pytest \
+  tests/test_conforformer_adapter.py \
+  tests/test_conforformer_cache.py \
+  tests/test_conforformer_config.py \
+  tests/test_conforformer_dictionary.py \
+  tests/test_conformer_generation.py \
+  tests/test_conforformer_preprocess.py \
+  tests/test_conforformer_full_pipeline.py \
+  tests/test_predict_conforformer_case.py
+```
+
+The full dataset workflow validates embedding integrity, checks molecule-level leakage, and records reproducibility metadata.
+
+Model comparisons should use the same target, data split, and comparison cohort. Metrics from different cohorts or training protocols should not be treated as directly equivalent.
+
+### 8. Additional Documentation
+
+Detailed implementation and experiment documentation:
+
+- [Full Dataset Workflow](docs/conforformer/FULL_DATASET_WORKFLOW.md)
+- [Implementation Plan](docs/conforformer/IMPLEMENTATION_PLAN.md)
+- [Checkpoint Asset Map](docs/conforformer/CHECKPOINT_ASSET_MAP.md)
+- [Local Encoder Compatibility](docs/conforformer/LOCAL_ENCODER_COMPATIBILITY.md)
+- [Upstream Audit](docs/conforformer/UPSTREAM_AUDIT.md)
+
+**Note:** ConforFormer model checkpoints, intermediate embedding caches, trained downstream estimators, and generated predictions should remain outside Git version control. The repository tracks the implementation, configurations, scripts, and documentation needed to reproduce experiments.
+
+
 ## Git Notes
 
 Do not commit generated artifacts:
@@ -753,4 +1242,3 @@ python scripts/check_molecule_in_dataset.py \
 
 Use `--smiles-column` and `--solvent-column` for datasets with nonstandard column
 names. Invalid dataset SMILES are skipped and counted in the terminal summary.
-
