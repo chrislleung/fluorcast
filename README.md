@@ -793,6 +793,16 @@ The ConforFormer workflow supports prediction of:
 - Quantum yield (`quantum_yield`)
 - Stokes shift (`stokes_shift_nm`)
 
+### Original Implementation and Attribution
+
+The ConforFormer molecular encoder was originally developed by the authors of the [ConforFormer project](https://github.com/EPiCs-group/ConforFormer).
+
+FluorCast builds upon the pretrained ConforFormer architecture by integrating its 3D molecular embeddings into a solvent-aware machine learning pipeline for predicting absorption wavelengths, emission wavelengths, quantum yields, and Stokes shifts.
+
+The original ConforFormer implementation is included as a Git submodule under `third_party/ConforFormer`. Pretrained model weights are available through the [official Hugging Face repository](https://huggingface.co/ConforFormer/ConforFormer).
+
+FluorCast's downstream training, molecular feature fusion, and fluorescence prediction workflows are implemented separately from the original ConforFormer project.
+
 ### 1. Model Architecture
 
 The ConforFormer pipeline follows these steps:
