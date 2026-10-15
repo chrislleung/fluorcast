@@ -128,3 +128,6 @@ data/processed/conforformer_smoke_cache/
 # Temporary script backups
 *.before_morgan_cli
 *.before_morgan_fix
+
+# Scatter plot 
+qy_scatter_updated

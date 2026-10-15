@@ -779,6 +779,8 @@ This is especially important for outside-domain molecules.
 
 ---
 
+# ConforFormer Integration
+
 ## Git Notes
 
 Do not commit generated artifacts:
