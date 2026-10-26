@@ -4,6 +4,7 @@ rdkit
 scikit-learn
 scipy
 matplotlib
+seaborn
 lightgbm
 xgboost
 catboost
